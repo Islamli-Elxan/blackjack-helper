@@ -1,40 +1,42 @@
 package az.nexgen.bjhelper
 
-import java.awt.image.BufferedImage
-import javax.imageio.ImageIO
+import java.util.zip.GZIPInputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Runs the finder on a real screenshot of the table: dealer 9, player 5 and 10. */
+/**
+ * Runs the finder on a real screenshot of the table (1080x2400): dealer 9, player 5 and 10.
+ * The resource holds the RGB pixels of the table area (rows 192 to 1775), gzip compressed.
+ */
 class CardFinderTest {
 
-    private fun load(): BufferedImage {
-        val stream = javaClass.getResourceAsStream("/table_clean.jpg")
-        return ImageIO.read(stream)
+    private val w = 1080
+    private val h = 2400
+    private val y0 = 192
+    private val roiH = 1584
+
+    private fun loadPixels(): IntArray {
+        val stream = javaClass.getResourceAsStream("/table_clean_roi.rgb.gz")
+        val raw = GZIPInputStream(stream).readBytes()
+        assertEquals(w * roiH * 3, raw.size)
+        val px = IntArray(w * roiH)
+        for (i in px.indices) {
+            val r = raw[i * 3].toInt() and 0xFF
+            val g = raw[i * 3 + 1].toInt() and 0xFF
+            val b = raw[i * 3 + 2].toInt() and 0xFF
+            px[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        return px
     }
 
-    private fun near(expected: Int, actual: Int, tol: Int = 8) {
-        assertTrue("expected about $expected but was $actual", Math.abs(expected - actual) <= tol)
+    private fun near(expected: Int, actual: Int) {
+        assertTrue("expected about $expected but was $actual", Math.abs(expected - actual) <= 8)
     }
 
     @Test
     fun findsEveryCornerRank() {
-        val img = load()
-        val w = img.width
-        val h = img.height
-        assertEquals(1080, w)
-        assertEquals(2400, h)
-
-        val y0 = (h * CardReader.CROP_TOP).toInt()
-        val y1 = (h * CardReader.CROP_BOTTOM).toInt()
-        val roiH = y1 - y0
-        val px = IntArray(w * roiH)
-        for (y in 0 until roiH) {
-            for (x in 0 until w) px[y * w + x] = img.getRGB(x, y0 + y)
-        }
-
-        val res = CardFinder.find(px, w, roiH, h, y0)
+        val res = CardFinder.find(loadPixels(), w, roiH, h, y0)
 
         val dealer = res.glyphs.filter { it.zone == 0 }
         val player = res.glyphs.filter { it.zone == 1 }
