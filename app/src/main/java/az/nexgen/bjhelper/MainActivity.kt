@@ -112,7 +112,8 @@ class MainActivity : Activity() {
             "\nİstifadə: Başla düyməsinə bas, ekran paylaşma sorğusunu təsdiqlə, sonra oyunu aç. " +
                 "Android 14 və yuxarıda \"Bir tətbiq\" seçib oyunu seçsən üzən pəncərə görüntüyə düşməz. " +
                 "\"Bütün ekran\" da işləyir.\n\n" +
-                "Üzən pəncərəyə toxunsan balacalaşır, sürüşdürsən yerini dəyişir. " +
+                "Üzən pəncərə əvvəlcə ekranın yuxarısında balaca olur; toxunsan açılır və kartlardan özü kənara çəkilir. " +
+                "Kartların üstünə düşərsə, proqram onu 0,2 saniyəlik şəffaflaşdırıb altını oxuyur. Sürüşdürsən yerini özün seçirsən. " +
                 "Say ↺ sayı sıfırlayır, Yeni əl cari əli unudur.\n\n" +
                 "Səhv oxuyursa Debug düyməsinə bas. Şəkil Pictures/BlackjackHelper qovluğuna düşür, " +
                 "onu göndər ki, tanımanı düzəldim.",

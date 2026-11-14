@@ -41,6 +41,9 @@ class CaptureService : Service() {
         private const val NOTIF_ID = 17
         private const val TAG = "BJHelper"
         private const val TICK_MS = 450L
+        private const val PEEK_EVERY_MS = 1500L
+        private const val PEEK_WAIT_MS = 190L
+        private const val MEMORY_MS = 10_000L
 
         private val NEUTRAL = 0xFFE6F0E9.toInt()
         private val C_HIT = 0xFFFFB978.toInt()
@@ -64,6 +67,12 @@ class CaptureService : Service() {
     private var started = false
     private var decks = 6
     private var countMode = true
+    private var screenW = 0
+    private var screenH = 0
+    @Volatile private var ovBounds: CardFinder.Box? = null
+    private var blobMemory: List<CardFinder.Box> = emptyList()
+    private var blobMemoryAt = 0L
+    private var lastPeek = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -144,6 +153,8 @@ class CaptureService : Service() {
         val size = screenSize()
         val w = size.first
         val h = size.second
+        screenW = w
+        screenH = h
         val dpi = resources.displayMetrics.densityDpi
         val r = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
         reader = r
@@ -164,7 +175,8 @@ class CaptureService : Service() {
             onResetShoe = { hd.post { tracker.resetShoe(); publish() } },
             onNewHand = { hd.post { tracker.clearRound(); publish() } },
             onDebug = { hd.post { dumpDebug() } },
-            onStop = { stopSelf() }
+            onStop = { stopSelf() },
+            onLayoutChanged = { onOverlayLayout() }
         )
         overlay?.show()
 
@@ -191,35 +203,102 @@ class CaptureService : Service() {
         return out
     }
 
+    private fun freshBlobs(now: Long): List<CardFinder.Box> =
+        if (now - blobMemoryAt < MEMORY_MS) blobMemory else emptyList()
+
+    /** Runs on the main thread whenever the window changes size or content. */
+    private fun onOverlayLayout() {
+        val ov = overlay ?: return
+        if (screenW == 0) return
+        var b = ov.bounds()
+        if (!ov.manual) {
+            val blobs = freshBlobs(SystemClock.elapsedRealtime())
+            if (Placer.covers(b, screenW, screenH, blobs)) {
+                val pos = Placer.choose(screenW, screenH, b.w, b.h, blobs, ov.inset())
+                if (pos.x != b.l || pos.y != b.t) {
+                    ov.moveTo(pos.x, pos.y)
+                    b = CardFinder.Box(pos.x, pos.y, pos.x + b.w, pos.y + b.h)
+                }
+            }
+        }
+        ovBounds = b
+    }
+
+    private fun drain() {
+        try {
+            reader?.acquireLatestImage()?.close()
+        } catch (t: Throwable) {
+            Log.w(TAG, "drain", t)
+        }
+    }
+
+    /** Newest frame, or null if the screen has not produced a new one. */
+    private fun grab(): Bitmap? {
+        val img = reader?.acquireLatestImage() ?: return null
+        return try {
+            toBitmap(img)
+        } finally {
+            img.close()
+        }
+    }
+
     private fun tick() {
         val hd = handler ?: return
         try {
-            val img = reader?.acquireLatestImage()
-            if (img != null) {
-                val fresh = try {
-                    toBitmap(img)
-                } finally {
-                    img.close()
-                }
+            val now = SystemClock.elapsedRealtime()
+            val ob = ovBounds
+            val covered = ob != null && Placer.covers(ob, screenW, screenH, freshBlobs(now))
+            if (covered && now - lastPeek >= PEEK_EVERY_MS) {
+                // The window may hide a card: make it see-through for a moment and look.
+                lastPeek = now
+                drain()
+                ui.post { overlay?.setHidden(true) }
+                hd.postDelayed({ peekRead() }, PEEK_WAIT_MS)
+                return
+            }
+            val fresh = grab()
+            if (fresh != null) {
                 lastBitmap?.recycle()
                 lastBitmap = fresh
-            }
-            val bmp = lastBitmap
-            val cr = cardReader
-            if (bmp != null && cr != null) {
-                val rd = cr.read(bmp)
-                lastReading = rd
-                if (rd.ok) {
-                    val now = SystemClock.elapsedRealtime()
-                    tracker.onReading(rd.dealer, rd.player, now)
-                    tracker.tick(now)
-                    publish()
-                }
+                if (!covered) readFrame(fresh)
             }
         } catch (t: Throwable) {
             Log.e(TAG, "tick failed", t)
         }
         hd.postDelayed({ tick() }, TICK_MS)
+    }
+
+    private fun peekRead() {
+        val hd = handler ?: return
+        try {
+            val fresh = grab()
+            ui.post { overlay?.setHidden(false) }
+            if (fresh != null) {
+                lastBitmap?.recycle()
+                lastBitmap = fresh
+                readFrame(fresh)
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "peek failed", t)
+            ui.post { overlay?.setHidden(false) }
+        }
+        hd.postDelayed({ tick() }, TICK_MS)
+    }
+
+    private fun readFrame(bmp: Bitmap) {
+        val cr = cardReader ?: return
+        val rd = cr.read(bmp)
+        lastReading = rd
+        val now = SystemClock.elapsedRealtime()
+        if (rd.blobs.isNotEmpty()) {
+            blobMemory = rd.blobs
+            blobMemoryAt = now
+        }
+        if (rd.ok) {
+            tracker.onReading(rd.dealer, rd.player, now)
+            tracker.tick(now)
+            publish()
+        }
     }
 
     private fun label(r: Int): String = if (r == 11) "A" else r.toString()
@@ -310,14 +389,30 @@ class CaptureService : Service() {
     }
 
     private fun dumpDebug() {
-        val bmp = lastBitmap
-        if (bmp == null) {
-            toast("Hələ görüntü yoxdur")
-            return
-        }
-        val note = "D: " + joinCards(tracker.dealer) + " | P: " + joinCards(tracker.player) + " | RC " + tracker.rc()
-        val saved = DebugDump.save(this, bmp, lastReading, note)
-        toast(if (saved != null) "Şəkil saxlandı: Pictures/BlackjackHelper" else "Şəkli saxlamaq alınmadı")
+        val hd = handler ?: return
+        // look at the game without our own window in the way
+        drain()
+        ui.post { overlay?.setHidden(true) }
+        hd.postDelayed({
+            val fresh = grab()
+            ui.post { overlay?.setHidden(false) }
+            val bmp = fresh ?: lastBitmap
+            if (bmp == null) {
+                toast("Hələ görüntü yoxdur")
+            } else {
+                if (fresh != null) {
+                    lastBitmap?.recycle()
+                    lastBitmap = fresh
+                }
+                val rd = cardReader?.read(bmp)
+                lastReading = rd
+                val note = "D: " + joinCards(tracker.dealer) + " | P: " + joinCards(tracker.player) +
+                    " | RC " + tracker.rc()
+                val raw = DebugDump.saveRaw(this, bmp)
+                val saved = DebugDump.save(this, bmp, rd, note)
+                toast(if (saved != null && raw != null) "2 şəkil saxlandı: Pictures/BlackjackHelper" else "Şəkli saxlamaq alınmadı")
+            }
+        }, PEEK_WAIT_MS)
     }
 
     override fun onDestroy() {

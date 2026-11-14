@@ -14,6 +14,9 @@ import android.util.Log
 /** Saves the last captured frame with the detected card areas and read ranks drawn on it, for tuning. */
 object DebugDump {
 
+    /** The frame exactly as captured, with nothing drawn on it. */
+    fun saveRaw(ctx: Context, src: Bitmap): String? = store(ctx, src, "bj-clean-")
+
     fun save(ctx: Context, src: Bitmap, reading: CardReader.Reading?, note: String): String? {
         return try {
             val bmp = src.copy(Bitmap.Config.ARGB_8888, true)
@@ -45,31 +48,40 @@ object DebugDump {
                     stroke.color = col
                     c.drawRect(Rect(it.box.l, it.box.t, it.box.r, it.box.b), stroke)
                     txt.color = col
-                    c.drawText("'" + it.text + "' = " + it.rank, it.box.l.toFloat(), it.box.t - 8f, txt)
+                    c.drawText(it.text + " " + Math.round(it.conf * 100) + "%", it.box.l.toFloat(), it.box.t - 8f, txt)
                 }
             }
             txt.color = Color.WHITE
             c.drawText(note, 20f, h * CardReader.CROP_TOP - 12f, txt)
 
+            val r = store(ctx, bmp, "bj-debug-")
+            bmp.recycle()
+            r
+        } catch (t: Throwable) {
+            Log.e("BJHelper", "debug dump failed", t)
+            null
+        }
+    }
+
+    private fun store(ctx: Context, bmp: Bitmap, prefix: String): String? {
+        return try {
             val values = ContentValues()
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, "bj-debug-" + System.currentTimeMillis() + ".png")
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, prefix + System.currentTimeMillis() + ".png")
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/png")
             if (Build.VERSION.SDK_INT >= 29) {
                 values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BlackjackHelper")
             }
             val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
-                bmp.recycle()
                 null
             } else {
                 ctx.contentResolver.openOutputStream(uri)?.use { out ->
                     bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
-                bmp.recycle()
                 uri.toString()
             }
         } catch (t: Throwable) {
-            Log.e("BJHelper", "debug dump failed", t)
+            Log.e("BJHelper", "store failed", t)
             null
         }
     }

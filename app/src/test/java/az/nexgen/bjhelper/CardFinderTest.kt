@@ -59,4 +59,34 @@ class CardFinderTest {
         near(502, player[1].box.r)
         near(1231, player[1].box.b)
     }
+
+    @Test
+    fun readsEveryCornerRank() {
+        val px = loadPixels()
+        val res = CardFinder.find(px, w, roiH, h, y0)
+        val clf = RankClassifier.load()
+        val labels = ArrayList<Char>()
+        for (g in res.glyphs) {
+            val gw = g.box.w
+            val gh = g.box.h
+            val mask = BooleanArray(gw * gh)
+            for (y in 0 until gh) {
+                for (x in 0 until gw) {
+                    mask[y * gw + x] = CardFinder.isInk(px[(g.box.t - y0 + y) * w + g.box.l + x])
+                }
+            }
+            val r = clf.classify(mask, gw, gh)
+            assertTrue("low confidence " + r.confidence, r.confidence > 0.9f)
+            labels.add(r.label)
+        }
+        // dealer 9, player 5 and 10
+        assertEquals(listOf('9', '5', 'T'), labels)
+    }
+
+    @Test
+    fun emptyMaskIsNotARank() {
+        val r = RankClassifier.load().classify(BooleanArray(100), 10, 10)
+        assertEquals('X', r.label)
+        assertEquals(null, r.rank)
+    }
 }

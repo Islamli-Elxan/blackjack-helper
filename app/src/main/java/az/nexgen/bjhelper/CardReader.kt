@@ -1,23 +1,18 @@
 package az.nexgen.bjhelper
 
 import android.graphics.Bitmap
-import android.util.Log
-import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Finds the corner rank of each face-up card by colour ([CardFinder]) and reads every rank
- * separately with on-device text recognition. A cleaned black-on-white copy of each rank is read,
- * and the answer is cached by pixel content so a static table costs no recognition work.
+ * Finds the corner rank of each face-up card by colour ([CardFinder]) and reads each rank with
+ * the built-in classifier ([RankClassifier]). Answers are cached by pixel content, so a static
+ * table costs almost no work. A glyph the classifier is not sure about is reported as unsure
+ * (the frame is then ignored) instead of guessed.
  */
 class CardReader {
 
-    class Item(val box: CardFinder.Box, val zone: Int, val text: String, val rank: Int?)
+    class Item(val box: CardFinder.Box, val zone: Int, val text: String, val rank: Int?, val conf: Float)
 
     class Reading(
         val ok: Boolean,
@@ -27,10 +22,8 @@ class CardReader {
         val items: List<Item>
     )
 
-    private class Img(val pix: IntArray, val w: Int, val h: Int)
-
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    private val cache = HashMap<Int, String>()
+    private val classifier = RankClassifier.load()
+    private val cache = HashMap<Int, RankClassifier.Result>()
 
     fun read(bmp: Bitmap): Reading {
         val w = bmp.width
@@ -43,84 +36,48 @@ class CardReader {
 
         val found = CardFinder.find(px, w, roiH, h, y0)
         val items = ArrayList<Item>()
-        var failed = false
+        var unsure = false
         for (g in found.glyphs) {
-            val text = recognize(px, w, roiH, y0, g.box)
-            if (text == null) {
-                failed = true
-                continue
-            }
-            items.add(Item(g.box, g.zone, text, RankParser.parse(text)))
+            val res = classify(px, w, roiH, y0, g.box)
+            val rank = res.rank
+            val sure = rank != null && res.confidence >= MIN_CONF
+            if (!sure) unsure = true
+            items.add(Item(g.box, g.zone, res.label.toString(), if (sure) rank else null, res.confidence))
         }
         val dealer = items.filter { it.zone == 0 }.mapNotNull { it.rank }
         val player = items.filter { it.zone == 1 }.mapNotNull { it.rank }
-        return Reading(!failed, dealer, player, found.blobs, items)
+        return Reading(!unsure, dealer, player, found.blobs, items)
     }
 
-    private fun recognize(px: IntArray, w: Int, roiH: Int, yOff: Int, box: CardFinder.Box): String? {
-        val first = glyphImage(px, w, roiH, yOff, box, 2, 30) ?: return ""
-        val key = first.pix.contentHashCode()
-        val cached = cache[key]
-        if (cached != null) return cached
-
-        var text = ocr(first) ?: return null
-        if (RankParser.parse(text) == null) {
-            val second = glyphImage(px, w, roiH, yOff, box, 3, 60)
-            if (second != null) {
-                val t2 = ocr(second)
-                if (t2 != null && RankParser.parse(t2) != null) text = t2
-            }
-        }
-        if (cache.size > 300) cache.clear()
-        cache[key] = text
-        return text
-    }
-
-    /** Black marks on white, only inside the glyph's own box, scaled up with a white margin. */
-    private fun glyphImage(
-        px: IntArray, w: Int, roiH: Int, yOff: Int, box: CardFinder.Box, scale: Int, margin: Int
-    ): Img? {
+    private fun classify(px: IntArray, w: Int, roiH: Int, yOff: Int, box: CardFinder.Box): RankClassifier.Result {
         val l = max(box.l, 0)
         val r = min(box.r, w)
         val t = max(box.t - yOff, 0)
         val b = min(box.b - yOff, roiH)
         val gw = r - l
         val gh = b - t
-        if (gw <= 0 || gh <= 0) return null
-        val ow = gw * scale + 2 * margin
-        val oh = gh * scale + 2 * margin
-        val out = IntArray(ow * oh)
-        java.util.Arrays.fill(out, -1)
-        val black = 0xFF000000.toInt()
+        if (gw <= 0 || gh <= 0) return RankClassifier.Result('X', 1f)
+        val mask = BooleanArray(gw * gh)
+        var hash = 17
         for (y in 0 until gh) {
             for (x in 0 until gw) {
-                if (CardFinder.isInk(px[(t + y) * w + l + x])) {
-                    for (dy in 0 until scale) {
-                        val row = (margin + y * scale + dy) * ow + margin + x * scale
-                        for (dx in 0 until scale) out[row + dx] = black
-                    }
-                }
+                val ink = CardFinder.isInk(px[(t + y) * w + l + x])
+                mask[y * gw + x] = ink
+                hash = hash * 31 + (if (ink) 1 else 0)
             }
         }
-        return Img(out, ow, oh)
-    }
-
-    private fun ocr(img: Img): String? {
-        val bmp = Bitmap.createBitmap(img.pix, img.w, img.h, Bitmap.Config.ARGB_8888)
-        return try {
-            val res = Tasks.await(recognizer.process(InputImage.fromBitmap(bmp, 0)), 3, TimeUnit.SECONDS)
-            res.text.replace(Regex("\\s"), "")
-        } catch (e: Exception) {
-            Log.w(TAG, "glyph recognition failed", e)
-            null
-        } finally {
-            bmp.recycle()
-        }
+        hash = hash * 31 + gw * 1000 + gh
+        val cached = cache[hash]
+        if (cached != null) return cached
+        val res = classifier.classify(mask, gw, gh)
+        if (cache.size > 300) cache.clear()
+        cache[hash] = res
+        return res
     }
 
     companion object {
-        private const val TAG = "BJHelper"
         const val CROP_TOP = 0.08f
         const val CROP_BOTTOM = 0.74f
+        const val MIN_CONF = 0.6f
     }
 }

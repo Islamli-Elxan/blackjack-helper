@@ -20,7 +20,8 @@ class Overlay(
     private val onResetShoe: () -> Unit,
     private val onNewHand: () -> Unit,
     private val onDebug: () -> Unit,
-    private val onStop: () -> Unit
+    private val onStop: () -> Unit,
+    private val onLayoutChanged: () -> Unit = {}
 ) {
 
     class UiState(
@@ -38,8 +39,12 @@ class Overlay(
     private val subTv = TextView(ctx)
     private val handsTv = TextView(ctx)
     private val countTv = TextView(ctx)
-    private var compact = false
+    private var compact = true
     private var added = false
+
+    /** True once the person has dragged the window: it then stays where they put it. */
+    var manual = false
+        private set
 
     private fun dp(v: Int): Int = (v * ctx.resources.displayMetrics.density + 0.5f).toInt()
 
@@ -54,7 +59,7 @@ class Overlay(
     init {
         params.gravity = Gravity.TOP or Gravity.START
         params.x = dp(12)
-        params.y = (ctx.resources.displayMetrics.heightPixels * 0.37f).toInt()
+        params.y = topInset() + dp(4)
 
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -70,6 +75,8 @@ class Overlay(
 
         subTv.textSize = 12f
         subTv.setTextColor(0xFFB9C9BF.toInt())
+        subTv.isSingleLine = true
+        subTv.ellipsize = android.text.TextUtils.TruncateAt.END
 
         handsTv.textSize = 13f
         handsTv.setTextColor(Color.WHITE)
@@ -95,6 +102,7 @@ class Overlay(
         root.addView(bigTv)
         root.addView(subTv)
         root.addView(details)
+        details.visibility = View.GONE
 
         root.setOnTouchListener(object : View.OnTouchListener {
             var startX = 0
@@ -116,7 +124,10 @@ class Overlay(
                     MotionEvent.ACTION_MOVE -> {
                         val dx = (e.rawX - touchX).toInt()
                         val dy = (e.rawY - touchY).toInt()
-                        if (abs(dx) > 8 || abs(dy) > 8) moved = true
+                        if (abs(dx) > 8 || abs(dy) > 8) {
+                            moved = true
+                            manual = true
+                        }
                         params.x = startX + dx
                         params.y = startY + dy
                         if (added) wm.updateViewLayout(root, params)
@@ -154,6 +165,40 @@ class Overlay(
     private fun toggleCompact() {
         compact = !compact
         details.visibility = if (compact) View.GONE else View.VISIBLE
+        manual = false
+        root.post { onLayoutChanged() }
+    }
+
+    private fun topInset(): Int {
+        val id = ctx.resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) ctx.resources.getDimensionPixelSize(id) else dp(24)
+    }
+
+    fun inset(): Int = topInset() + dp(4)
+
+    fun isCompact(): Boolean = compact
+
+    /** Where the window is right now, in screen pixels. */
+    fun bounds(): CardFinder.Box {
+        val w = if (root.width > 0) root.width else params.width
+        val h = if (root.height > 0) root.height else dp(80)
+        return CardFinder.Box(params.x, params.y, params.x + w, params.y + h)
+    }
+
+    fun moveTo(x: Int, y: Int) {
+        params.x = x
+        params.y = y
+        if (added) {
+            try { wm.updateViewLayout(root, params) } catch (t: Throwable) { /* gone */ }
+        }
+    }
+
+    /** Fully see-through for a moment, so a screen capture shows the game underneath. */
+    fun setHidden(hidden: Boolean) {
+        params.alpha = if (hidden) 0f else 1f
+        if (added) {
+            try { wm.updateViewLayout(root, params) } catch (t: Throwable) { /* gone */ }
+        }
     }
 
     fun show() {
@@ -184,5 +229,6 @@ class Overlay(
         handsTv.text = s.hands
         countTv.text = s.count
         countTv.visibility = if (s.count.isEmpty()) View.GONE else View.VISIBLE
+        root.post { onLayoutChanged() }
     }
 }

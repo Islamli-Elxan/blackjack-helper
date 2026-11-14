@@ -84,19 +84,6 @@ class StrategyTest {
     }
 
     @Test
-    fun rankParsing() {
-        assertEquals(11, RankParser.parse("A"))
-        assertEquals(10, RankParser.parse("10"))
-        assertEquals(10, RankParser.parse("K"))
-        assertEquals(10, RankParser.parse("1O"))
-        assertEquals(9, RankParser.parse(" 9 "))
-        assertEquals(5, RankParser.parse("5♣"))
-        assertNull(RankParser.parse("LONDON"))
-        assertNull(RankParser.parse("25"))
-        assertNull(RankParser.parse("1"))
-    }
-
-    @Test
     fun trackerAcceptsAndCommitsRound() {
         val t = RoundTracker(stableMs = 600L, clearMs = 900L)
         t.onReading(listOf(6), listOf(2, 3), 0L)
