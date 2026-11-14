@@ -44,7 +44,7 @@ class Overlay(
     private fun dp(v: Int): Int = (v * ctx.resources.displayMetrics.density + 0.5f).toInt()
 
     private val params = WindowManager.LayoutParams(
-        dp(236),
+        dp(250),
         WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -63,7 +63,7 @@ class Overlay(
         bg.cornerRadius = dp(16).toFloat()
         root.background = bg
 
-        bigTv.textSize = 30f
+        bigTv.textSize = 26f
         bigTv.setTypeface(Typeface.DEFAULT_BOLD)
         bigTv.setTextColor(Color.WHITE)
         bigTv.text = "Hazırdır"
@@ -83,7 +83,7 @@ class Overlay(
         buttons.orientation = LinearLayout.HORIZONTAL
         buttons.setPadding(0, dp(10), 0, 0)
         buttons.addView(button("Say ↺") { onResetShoe() })
-        buttons.addView(button("Yeni əl") { onNewHand() })
+        buttons.addView(button("Yeni") { onNewHand() })
         buttons.addView(button("Debug") { onDebug() })
         buttons.addView(button("✕") { onStop() })
 
@@ -136,7 +136,8 @@ class Overlay(
         val tv = TextView(ctx)
         tv.text = label
         tv.setTextColor(Color.WHITE)
-        tv.textSize = 12f
+        tv.textSize = 11f
+        tv.isSingleLine = true
         tv.gravity = Gravity.CENTER
         tv.setPadding(dp(4), dp(9), dp(4), dp(9))
         val bg = GradientDrawable()

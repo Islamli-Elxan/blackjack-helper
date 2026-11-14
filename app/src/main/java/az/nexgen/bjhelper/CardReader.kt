@@ -1,137 +1,126 @@
 package az.nexgen.bjhelper
 
 import android.graphics.Bitmap
-import android.graphics.Rect
 import android.util.Log
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.TimeUnit
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * Reads the rank printed in the top-left corner of every face-up card on the table.
- * It runs on-device text recognition on the table area, keeps only text that sits on a cream
- * card face, keeps the top row of corner indexes and sorts them left to right.
+ * Finds the corner rank of each face-up card by colour ([CardFinder]) and reads every rank
+ * separately with on-device text recognition. A cleaned black-on-white copy of each rank is read,
+ * and the answer is cached by pixel content so a static table costs no recognition work.
  */
 class CardReader {
 
-    class Cand(
-        val text: String,
-        val box: Rect,
-        val rank: Int?,
-        val cream: Float,
-        var accepted: Boolean = false,
-        var reason: String = ""
-    )
+    class Item(val box: CardFinder.Box, val zone: Int, val text: String, val rank: Int?)
 
     class Reading(
         val ok: Boolean,
         val dealer: List<Int>,
         val player: List<Int>,
-        val cands: List<Cand>
+        val blobs: List<CardFinder.Box>,
+        val items: List<Item>
     )
 
+    private class Img(val pix: IntArray, val w: Int, val h: Int)
+
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private val cache = HashMap<Int, String>()
 
     fun read(bmp: Bitmap): Reading {
         val w = bmp.width
         val h = bmp.height
-        val top = (h * CROP_TOP).toInt()
-        val bottom = (h * CROP_BOTTOM).toInt()
-        val crop = Bitmap.createBitmap(bmp, 0, top, w, bottom - top)
+        val y0 = (h * CROP_TOP).toInt()
+        val y1 = (h * CROP_BOTTOM).toInt()
+        val roiH = y1 - y0
+        val px = IntArray(w * roiH)
+        bmp.getPixels(px, 0, w, 0, y0, w, roiH)
 
-        val result = try {
-            Tasks.await(recognizer.process(InputImage.fromBitmap(crop, 0)), 4, TimeUnit.SECONDS)
-        } catch (e: Exception) {
-            Log.w(TAG, "text recognition failed", e)
-            null
-        } finally {
-            crop.recycle()
+        val found = CardFinder.find(px, w, roiH, h, y0)
+        val items = ArrayList<Item>()
+        var failed = false
+        for (g in found.glyphs) {
+            val text = recognize(px, w, roiH, y0, g.box)
+            if (text == null) {
+                failed = true
+                continue
+            }
+            items.add(Item(g.box, g.zone, text, RankParser.parse(text)))
         }
-        if (result == null) return Reading(false, emptyList(), emptyList(), emptyList())
+        val dealer = items.filter { it.zone == 0 }.mapNotNull { it.rank }
+        val player = items.filter { it.zone == 1 }.mapNotNull { it.rank }
+        return Reading(!failed, dealer, player, found.blobs, items)
+    }
 
-        val cands = ArrayList<Cand>()
-        for (block in result.textBlocks) {
-            for (line in block.lines) {
-                for (el in line.elements) {
-                    val b = el.boundingBox ?: continue
-                    val box = Rect(b.left, b.top + top, b.right, b.bottom + top)
-                    cands.add(Cand(el.text, box, RankParser.parse(el.text), creamFraction(bmp, box)))
+    private fun recognize(px: IntArray, w: Int, roiH: Int, yOff: Int, box: CardFinder.Box): String? {
+        val first = glyphImage(px, w, roiH, yOff, box, 2, 30) ?: return ""
+        val key = first.pix.contentHashCode()
+        val cached = cache[key]
+        if (cached != null) return cached
+
+        var text = ocr(first) ?: return null
+        if (RankParser.parse(text) == null) {
+            val second = glyphImage(px, w, roiH, yOff, box, 3, 60)
+            if (second != null) {
+                val t2 = ocr(second)
+                if (t2 != null && RankParser.parse(t2) != null) text = t2
+            }
+        }
+        if (cache.size > 300) cache.clear()
+        cache[key] = text
+        return text
+    }
+
+    /** Black marks on white, only inside the glyph's own box, scaled up with a white margin. */
+    private fun glyphImage(
+        px: IntArray, w: Int, roiH: Int, yOff: Int, box: CardFinder.Box, scale: Int, margin: Int
+    ): Img? {
+        val l = max(box.l, 0)
+        val r = min(box.r, w)
+        val t = max(box.t - yOff, 0)
+        val b = min(box.b - yOff, roiH)
+        val gw = r - l
+        val gh = b - t
+        if (gw <= 0 || gh <= 0) return null
+        val ow = gw * scale + 2 * margin
+        val oh = gh * scale + 2 * margin
+        val out = IntArray(ow * oh)
+        java.util.Arrays.fill(out, -1)
+        val black = 0xFF000000.toInt()
+        for (y in 0 until gh) {
+            for (x in 0 until gw) {
+                if (CardFinder.isInk(px[(t + y) * w + l + x])) {
+                    for (dy in 0 until scale) {
+                        val row = (margin + y * scale + dy) * ow + margin + x * scale
+                        for (dx in 0 until scale) out[row + dx] = black
+                    }
                 }
             }
         }
-
-        val minH = h * 0.012f
-        val maxH = h * 0.07f
-        val valid = ArrayList<Cand>()
-        for (c in cands) {
-            val bh = c.box.height()
-            when {
-                c.rank == null -> c.reason = "no-rank"
-                bh < minH || bh > maxH -> c.reason = "size"
-                c.cream < CREAM_MIN -> c.reason = "not-cream"
-                else -> valid.add(c)
-            }
-        }
-
-        val split = h * DEALER_LIMIT
-        val dealerCards = pickRow(valid.filter { it.box.centerY() < split })
-        val playerCards = pickRow(valid.filter { it.box.centerY() >= split })
-        for (c in valid) {
-            if (c in dealerCards || c in playerCards) c.accepted = true else c.reason = "other-row"
-        }
-        return Reading(
-            true,
-            dealerCards.map { it.rank!! },
-            playerCards.map { it.rank!! },
-            cands
-        )
+        return Img(out, ow, oh)
     }
 
-    /** Keeps only the top row of corner indexes; the rotated index in the bottom corner sits far lower. */
-    private fun pickRow(list: List<Cand>): List<Cand> {
-        if (list.isEmpty()) return emptyList()
-        var best = list[0]
-        for (c in list) if (c.box.top < best.box.top) best = c
-        val tol = maxOf(12, best.box.height() / 2)
-        return list.filter { it.box.top - best.box.top <= tol }.sortedBy { it.box.left }
-    }
-
-    /** Share of near-white, low-saturation pixels around the text box. Text on a card face scores high. */
-    private fun creamFraction(bmp: Bitmap, box: Rect): Float {
-        val r = Rect(box)
-        r.inset(-4, -4)
-        val l = r.left.coerceIn(0, bmp.width - 1)
-        val t = r.top.coerceIn(0, bmp.height - 1)
-        val rr = r.right.coerceIn(l + 1, bmp.width)
-        val bb = r.bottom.coerceIn(t + 1, bmp.height)
-        var good = 0
-        var total = 0
-        var y = t
-        while (y < bb) {
-            var x = l
-            while (x < rr) {
-                val p = bmp.getPixel(x, y)
-                val red = (p shr 16) and 0xFF
-                val green = (p shr 8) and 0xFF
-                val blue = p and 0xFF
-                val mx = maxOf(red, maxOf(green, blue))
-                val mn = minOf(red, minOf(green, blue))
-                if (mn >= 200 && mx - mn <= 45) good++
-                total++
-                x += 3
-            }
-            y += 3
+    private fun ocr(img: Img): String? {
+        val bmp = Bitmap.createBitmap(img.pix, img.w, img.h, Bitmap.Config.ARGB_8888)
+        return try {
+            val res = Tasks.await(recognizer.process(InputImage.fromBitmap(bmp, 0)), 3, TimeUnit.SECONDS)
+            res.text.replace(Regex("\\s"), "")
+        } catch (e: Exception) {
+            Log.w(TAG, "glyph recognition failed", e)
+            null
+        } finally {
+            bmp.recycle()
         }
-        return if (total == 0) 0f else good.toFloat() / total
     }
 
     companion object {
         private const val TAG = "BJHelper"
         const val CROP_TOP = 0.08f
         const val CROP_BOTTOM = 0.74f
-        const val DEALER_LIMIT = 0.41f
-        private const val CREAM_MIN = 0.5f
     }
 }

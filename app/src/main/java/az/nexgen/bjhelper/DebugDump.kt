@@ -6,11 +6,12 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 
-/** Saves the last captured frame with every recognised text box drawn on it, for tuning. */
+/** Saves the last captured frame with the detected card areas and read ranks drawn on it, for tuning. */
 object DebugDump {
 
     fun save(ctx: Context, src: Bitmap, reading: CardReader.Reading?, note: String): String? {
@@ -24,28 +25,27 @@ object DebugDump {
             guide.color = Color.YELLOW
             guide.strokeWidth = 3f
             c.drawLine(0f, h * CardReader.CROP_TOP, w, h * CardReader.CROP_TOP, guide)
-            c.drawLine(0f, h * CardReader.DEALER_LIMIT, w, h * CardReader.DEALER_LIMIT, guide)
+            c.drawLine(0f, h * CardFinder.DEALER_LIMIT, w, h * CardFinder.DEALER_LIMIT, guide)
             c.drawLine(0f, h * CardReader.CROP_BOTTOM, w, h * CardReader.CROP_BOTTOM, guide)
 
             val stroke = Paint()
             stroke.style = Paint.Style.STROKE
             stroke.strokeWidth = 4f
             val txt = Paint()
-            txt.textSize = 30f
+            txt.textSize = 34f
             txt.isAntiAlias = true
 
             if (reading != null) {
-                for (cd in reading.cands) {
-                    val col = when {
-                        cd.accepted -> Color.GREEN
-                        cd.rank != null -> Color.RED
-                        else -> Color.LTGRAY
-                    }
+                stroke.color = Color.CYAN
+                for (b in reading.blobs) {
+                    c.drawRect(Rect(b.l, b.t, b.r, b.b), stroke)
+                }
+                for (it in reading.items) {
+                    val col = if (it.rank != null) Color.GREEN else Color.RED
                     stroke.color = col
-                    c.drawRect(cd.box, stroke)
+                    c.drawRect(Rect(it.box.l, it.box.t, it.box.r, it.box.b), stroke)
                     txt.color = col
-                    val label = cd.text + " c" + (cd.cream * 100).toInt() + " " + cd.reason
-                    c.drawText(label, cd.box.left.toFloat(), cd.box.top - 6f, txt)
+                    c.drawText("'" + it.text + "' = " + it.rank, it.box.l.toFloat(), it.box.t - 8f, txt)
                 }
             }
             txt.color = Color.WHITE
