@@ -4,7 +4,7 @@ Oyunun ekranını oxuyur, kartları tanıyır və üzən pəncərədə Hit / Sta
 
 ## Quraşdırma
 
-1. Bu repo-nun **Releases** səhifəsindən ən son `app-debug.apk` faylını yüklə.
+1. Birbaşa yüklə: https://github.com/Islamli-Elxan/blackjack-helper/releases/latest/download/blackjack-helper.apk (həmişə ən son versiya, tək fayl).
 2. Telefon "naməlum mənbə" icazəsi istəsə, brauzer üçün ver.
 3. Tətbiqi aç, üzən pəncərə icazəsini ver, **Başla** düyməsinə bas.
 4. Ekran paylaşma sorğusunu təsdiqlə və oyunu aç.
@@ -12,7 +12,7 @@ Oyunun ekranını oxuyur, kartları tanıyır və üzən pəncərədə Hit / Sta
 ## Necə işləyir
 
 - `CaptureService` ekranı MediaProjection ilə tutur.
-- `CardReader` kartların sol üst küncündəki rəqəmi cihaz üzərində mətn tanıma ilə oxuyur.
+- `CardReader` kartların sol üst küncündəki rəqəmi cihaz üzərində öz kiçik neyron şəbəkəsi ilə tanıyır (internet və Google xidməti lazım deyil).
 - `RoundTracker` oxunuşları sabitləşdirir və hər əldən sonra sayı yeniləyir.
 - `Strategy` basic strategy cədvəli və bir neçə Hi-Lo indeksidir.
 - `Overlay` sürüşdürülə bilən kiçik pəncərədir.
@@ -21,4 +21,4 @@ Səhv oxuyursa üzən pəncərədəki **Debug** düyməsi `Pictures/BlackjackHel
 
 ## Build
 
-GitHub Actions hər `main` push-unda debug APK qurur və Release kimi yükləyir (`.github/workflows/build.yml`).
+GitHub Actions hər `main` push-unda APK qurur və `latest` Release-ini təzələyir (həmişə tək `blackjack-helper.apk`) (`.github/workflows/build.yml`).

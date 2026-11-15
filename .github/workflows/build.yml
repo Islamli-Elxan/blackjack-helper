@@ -26,13 +26,16 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Publish APK as a release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
-          prerelease: true
-          files: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish the single APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk blackjack-helper.apk
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest blackjack-helper.apk \
+            --title "Blackjack Köməkçisi" \
+            --notes "Tək APK. Yüklə, qur, aç. Son build: ${{ github.run_number }} (${GITHUB_SHA::7})" \
+            --latest --target "$GITHUB_SHA"
 
       - name: Unit tests
         continue-on-error: true
