@@ -50,6 +50,7 @@ class RoundLog(
     private var lastDealer: List<Int> = emptyList()
     private var lastHands: List<List<Int>> = emptyList()
     private var lastAdvice: List<String> = emptyList()
+    private var lastBadgeKey = ""
     private var lastNow = 0L
     private var decidedKey = ""
     private var decidedSince = 0L
@@ -92,8 +93,10 @@ class RoundLog(
             lastDealer = emptyList()
             lastHands = emptyList()
             lastAdvice = emptyList()
+            lastBadgeKey = ""
         }
-        val changed = dealer != lastDealer || hands != lastHands || advice != lastAdvice
+        val badgeKey = layout.substringAfter(" B:", "")
+        val changed = dealer != lastDealer || hands != lastHands || advice != lastAdvice || badgeKey != lastBadgeKey
         if (changed && r.events.size < MAX_EVENTS) {
             r.events.add(Event(now - t0, dealer, hands, rc, tc, advice, layout))
         }
@@ -101,6 +104,7 @@ class RoundLog(
         lastDealer = dealer
         lastHands = hands
         lastAdvice = advice
+        lastBadgeKey = badgeKey
 
         // count the result once the dealer is done and nothing has changed for a moment
         if (!counted && hands.isNotEmpty()) {

@@ -168,4 +168,19 @@ class CardFinderTest {
         assertEquals(listOf(10), dealer)
         assertEquals(listOf(10, 2), player)
     }
+
+    private fun argb(r: Int, g: Int, b: Int) = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+
+    @Test
+    fun tableColourIsNotInk() {
+        // black and dark grey marks, red marks: ink
+        assertTrue(CardFinder.isInk(argb(20, 20, 22)))
+        assertTrue(CardFinder.isInk(argb(110, 105, 100)))
+        assertTrue(CardFinder.isInk(argb(200, 30, 40)))
+        // the dark green and teal of the table showing past a card corner: not ink
+        assertTrue(!CardFinder.isInk(argb(25, 90, 35)))
+        assertTrue(!CardFinder.isInk(argb(40, 100, 120)))
+        // the cream of the card: not ink
+        assertTrue(!CardFinder.isInk(argb(245, 240, 225)))
+    }
 }

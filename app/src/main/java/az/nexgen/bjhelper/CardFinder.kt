@@ -35,13 +35,18 @@ object CardFinder {
 
     const val INK_LIMIT = 190
 
-    /** Dark or strongly red. A lower [limit] ignores shadows on the card, a higher one catches grey marks. */
+    /**
+     * Dark or strongly red. A lower [limit] ignores shadows on the card, a higher one catches grey marks.
+     * A dark pixel with the green or blue of the table is not ink: it is the table showing past a
+     * card's rounded corner or edge, and it must not stick to the mark beside it.
+     */
     fun isInk(p: Int, limit: Int = INK_LIMIT): Boolean {
         val r = (p shr 16) and 0xFF
         val g = (p shr 8) and 0xFF
         val b = p and 0xFF
         val mx = max(r, max(g, b))
-        return mx < limit || r - max(g, b) > 60
+        val table = max(g - r, b - r) > 25
+        return (mx < limit && !table) || r - max(g, b) > 60
     }
 
     /**

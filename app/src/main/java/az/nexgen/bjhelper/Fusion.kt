@@ -28,6 +28,21 @@ object Fusion {
         return low == total
     }
 
+    /** A printed total: [value] is the higher one of a soft hand ("7/17" has value 17, low 7). */
+    class Total(val value: Int, val soft: Boolean = false, val low: Int = 0, val strong: Boolean = true)
+
+    /** The hand as far as a total tells. A soft total keeps its ace, so the advice stays soft. */
+    fun standIn(t: Total, dealer: Boolean): List<Int> {
+        if (t.soft) {
+            return when {
+                t.low <= 1 -> listOf(11)
+                t.low == 2 -> listOf(11, 11)
+                else -> listOf(11, t.low - 1)
+            }
+        }
+        return if (dealer) standInDealer(t.value) else standInPlayer(t.value)
+    }
+
     /** The dealer's hand as far as a total tells: one card up to 11, else a plausible hand. */
     fun standInDealer(total: Int): List<Int> = when {
         total <= 11 -> listOf(total)
@@ -45,39 +60,41 @@ object Fusion {
         else -> listOf(10, 10, total - 20)
     }
 
-    fun dealer(ranks: List<Int>, sure: Boolean, badge: Int?): Zone {
-        if (badge == null) return Zone(if (ranks.isEmpty()) emptyList() else listOf(ranks), false, false, sure)
-        if (sure && ranks.isNotEmpty() && consistent(ranks, badge)) {
+    fun dealer(ranks: List<Int>, sure: Boolean, t: Total?): Zone {
+        if (t == null) return Zone(if (ranks.isEmpty()) emptyList() else listOf(ranks), false, false, sure)
+        if (sure && ranks.isNotEmpty() && consistent(ranks, t.value)) {
             return Zone(listOf(ranks), true, false, true)
         }
-        return Zone(listOf(standInDealer(badge)), false, true, true)
+        // a total that was hard to read only confirms; it never overrules the cards
+        if (!t.strong) return Zone(if (ranks.isEmpty()) emptyList() else listOf(ranks), false, false, sure)
+        return Zone(listOf(standIn(t, true)), false, true, true)
     }
 
     /**
      * @param hands the player's hands as read (one list per pile of cards)
-     * @param badges the printed totals from left to right, null where one could not be read
+     * @param totals the printed totals from left to right, null where one could not be read
      */
-    fun player(hands: List<List<Int>>, sure: Boolean, badges: List<Int?>): Zone {
+    fun player(hands: List<List<Int>>, sure: Boolean, totals: List<Total?>): Zone {
         val plain = Zone(hands, false, false, sure)
-        if (badges.isEmpty()) return plain
-        val known = badges.filterNotNull()
+        if (totals.isEmpty()) return plain
+        val known = totals.filterNotNull()
         if (known.isEmpty()) return plain
 
         if (sure && hands.isNotEmpty()) {
-            if (badges.size == hands.size) {
+            if (totals.size == hands.size) {
                 var ok = true
                 for (i in hands.indices) {
-                    val b = badges[i] ?: continue
-                    if (!consistent(hands[i], b)) ok = false
+                    val t = totals[i] ?: continue
+                    if (!consistent(hands[i], t.value)) ok = false
                 }
                 if (ok) return Zone(hands, true, false, true)
-            } else if (badges.size == 1 && badges[0] != null) {
+            } else if (totals.size == 1 && totals[0] != null) {
                 // one printed total: the "hands" are one pile that was cut in two by mistake
                 val merged = hands.flatten()
-                if (consistent(merged, badges[0]!!)) return Zone(listOf(merged), true, false, true)
+                if (consistent(merged, totals[0]!!.value)) return Zone(listOf(merged), true, false, true)
             }
         }
-        if (known.size != badges.size) return plain
-        return Zone(known.map { standInPlayer(it) }, false, true, true)
+        if (known.size != totals.size || known.any { !it.strong }) return plain
+        return Zone(known.map { standIn(it, false) }, false, true, true)
     }
 }

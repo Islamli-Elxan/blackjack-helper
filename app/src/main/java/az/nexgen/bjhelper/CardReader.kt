@@ -88,8 +88,8 @@ class CardReader {
         // a total with no card on the table is a leftover of the animation, not a hand
         val dealerCards = found.blobs.any { (it.t + it.b) / 2f < CardFinder.DEALER_LIMIT * h }
         val playerCards = found.blobs.any { (it.t + it.b) / 2f >= CardFinder.DEALER_LIMIT * h }
-        val dealerTotal = if (dealerCards && db.badges.size == 1) db.badges[0].value else null
-        val playerTotals = if (playerCards) pb.badges.sortedBy { it.cx }.map { it.value } else emptyList()
+        val dealerTotal = if (dealerCards && db.badges.size == 1) total(db.badges[0]) else null
+        val playerTotals = if (playerCards) pb.badges.sortedBy { it.cx }.map { total(it) } else emptyList()
         val dz = Fusion.dealer(rawDealer, !zoneUnsure[0], dealerTotal)
         val pz = Fusion.player(rawHands, !zoneUnsure[1], playerTotals)
         val dealer = dz.hands.firstOrNull() ?: emptyList()
@@ -97,8 +97,9 @@ class CardReader {
         val player = hands.flatten()
         val dealerSure = dz.sure
         val playerSure = pz.sure
-        val badgeText = (if (db.badges.isEmpty()) "" else "d" + db.badges.joinToString(",") { it.value?.toString() ?: "?" }) +
-            (if (pb.badges.isEmpty()) "" else " m" + pb.badges.sortedBy { it.cx }.joinToString(",") { it.value?.toString() ?: "?" })
+        val badgeText = (if (db.badges.isEmpty()) "" else "d" + db.badges.joinToString(",") { show(it) }) +
+            (if (pb.badges.isEmpty()) "" else " m" + pb.badges.sortedBy { it.cx }.joinToString(",") { show(it) })
+        val weak = (db.badges + pb.badges).filter { it.dump.isNotEmpty() }
 
         val sb = StringBuilder()
         sb.append("kart ").append(found.blobs.size).append(": ")
@@ -128,12 +129,25 @@ class CardReader {
             }
         }
 
+        // marks of a total that was hard to read, for the report
+        for (b in weak.take(2)) {
+            missed.add(RoundLog.Missed(2, "total " + show(b), 0f, 0, 0, b.dump))
+        }
+
         return Reading(
             dealerSure || playerSure, dealer, player, hands, found.blobs, items, sb.toString().trim(),
             dealerSure, playerSure, layout, missed,
             dz.verified, pz.verified, dz.approx, pz.approx, badgeText
         )
     }
+
+    private fun show(b: BadgeReader.Badge): String {
+        val v = b.value ?: return "?"
+        return (if (b.soft) b.low.toString() + "/" else "") + v + (if (b.strong) "" else "~")
+    }
+
+    private fun total(b: BadgeReader.Badge): Fusion.Total? =
+        b.value?.let { Fusion.Total(it, b.soft, b.low, b.strong) }
 
     private fun readBand(bmp: Bitmap, top: Float, bottom: Float, cover: CardFinder.Box?): BadgeReader.Band {
         val w = bmp.width

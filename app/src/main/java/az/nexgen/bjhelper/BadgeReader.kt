@@ -8,11 +8,26 @@ import kotlin.math.min
  * Reads the hand totals the game prints in a dark badge above the dealer's cards and below the
  * player's cards (white italic digits). A total is a second, independent view of the hand: it
  * confirms the card ranks, and stands in for them when a card cannot be read.
+ * A hand with an ace counted as 11 shows both totals, such as "7/17".
  */
 object BadgeReader {
 
-    /** value is null when something badge-like was found but could not be read with certainty. */
-    class Badge(val value: Int?, val cx: Int)
+    /**
+     * @param value the total (for "7/17" the higher one); null when it could not be read at all
+     * @param soft shown as "low/high"
+     * @param strong every mark was recognised with high confidence
+     * @param dump the marks as text when the reading was not strong, for the report
+     */
+    class Badge(
+        val value: Int?,
+        val cx: Int,
+        val soft: Boolean = false,
+        val strong: Boolean = false,
+        val dump: List<String> = emptyList()
+    ) {
+        /** The lower total of a soft hand ("7" of "7/17"). */
+        var low: Int = 0
+    }
 
     class Band(val badges: List<Badge>, val blocked: Boolean)
 
@@ -21,7 +36,8 @@ object BadgeReader {
     const val PLAYER_TOP = 0.675f
     const val PLAYER_BOTTOM = 0.735f
 
-    private const val MIN_DIGIT_CONF = 0.85f
+    private const val STRONG_CONF = 0.85f
+    private const val MIN_CONF = 0.5f
 
     private val digits: RankClassifier by lazy { RankClassifier.loadDigits() }
 
@@ -133,16 +149,61 @@ object BadgeReader {
 
     private fun toBadge(cluster: List<Comp>): Badge {
         val cx = (cluster.first().l + cluster.last().r) / 2
-        if (cluster.size > 2) return Badge(null, cx)
+        if (cluster.size > 5) return Badge(null, cx)
         val sb = StringBuilder()
+        var minConf = 1f
         for (c in cluster) {
             // two digits that touch form one wide piece
             if (c.w > 0.9f * c.h) return Badge(null, cx)
             val res = digits.classify(c.mask, c.w, c.h)
-            if (res.confidence < MIN_DIGIT_CONF) return Badge(null, cx)
+            if (res.confidence < MIN_CONF) return Badge(null, cx, dump = dump(cluster))
+            if (res.confidence < minConf) minConf = res.confidence
             sb.append(res.label)
         }
-        val v = sb.toString().toInt()
-        return Badge(if (v in 2..30) v else null, cx)
+        val text = sb.toString()
+        val strong = minConf >= STRONG_CONF
+        val parsed = parse(text) ?: return Badge(null, cx, dump = dump(cluster))
+        val badge = Badge(parsed.first, cx, parsed.second != 0, strong, if (strong) emptyList() else dump(cluster))
+        badge.low = parsed.second
+        return badge
+    }
+
+    /** "17" -> (17, 0); "7/17" -> (17, 7); anything else null. Totals are 2..30, soft ones 11..21. */
+    fun parse(text: String): Pair<Int, Int>? {
+        val slash = text.indexOf('/')
+        if (slash < 0) {
+            if (text.length !in 1..2) return null
+            val v = text.toIntOrNull() ?: return null
+            return if (v in 2..30) Pair(v, 0) else null
+        }
+        if (slash == 0 || slash == text.length - 1 || text.indexOf('/', slash + 1) >= 0) return null
+        val lo = text.substring(0, slash).toIntOrNull() ?: return null
+        val hi = text.substring(slash + 1).toIntOrNull() ?: return null
+        if (hi != lo + 10 || hi !in 11..21) return null
+        return Pair(hi, lo)
+    }
+
+    /** Half-size picture of the marks, so a misread can be studied later. */
+    private fun dump(cluster: List<Comp>): List<String> {
+        val rows = ArrayList<String>()
+        for (c in cluster.take(2)) {
+            var y = 0
+            while (y < c.h && rows.size < 30) {
+                val sb = StringBuilder()
+                var x = 0
+                while (x < c.w) {
+                    var any = false
+                    for (dy in 0..1) for (dx in 0..1) {
+                        if (y + dy < c.h && x + dx < c.w && c.mask[(y + dy) * c.w + x + dx]) any = true
+                    }
+                    sb.append(if (any) '#' else '.')
+                    x += 2
+                }
+                rows.add(sb.toString())
+                y += 2
+            }
+            rows.add("-")
+        }
+        return rows
     }
 }

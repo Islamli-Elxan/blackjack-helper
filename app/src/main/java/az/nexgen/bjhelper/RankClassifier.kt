@@ -70,7 +70,7 @@ class RankClassifier private constructor(
         const val GW = 16
         const val GH = 24
         private const val RANK_LABELS = "A23456789TX"
-        const val DIGIT_LABELS = "0123456789"
+        const val DIGIT_LABELS = "0123456789/"
 
         fun load(): RankClassifier = load("/rank_model.bin", RANK_LABELS)
 
