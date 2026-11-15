@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -14,7 +15,10 @@ import android.widget.TextView
 import android.widget.Toast
 import kotlin.math.abs
 
-/** Small draggable window that floats above the game. Tap the title to collapse it. */
+/**
+ * Wide, low window along the top of the screen, above the dealer's cards, so it never covers a card.
+ * Tap the title row to open or close the details; drag to move it somewhere else.
+ */
 class Overlay(
     private val ctx: Context,
     private val onResetShoe: () -> Unit,
@@ -29,16 +33,20 @@ class Overlay(
         val sub: String,
         val color: Int,
         val hands: String,
-        val count: String
+        val count: String,
+        val diag: String = ""
     )
 
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val root = LinearLayout(ctx)
+    private val head = LinearLayout(ctx)
     private val details = LinearLayout(ctx)
     private val bigTv = TextView(ctx)
     private val subTv = TextView(ctx)
     private val handsTv = TextView(ctx)
     private val countTv = TextView(ctx)
+    private val diagTv = TextView(ctx)
+    private val buttons = LinearLayout(ctx)
     private var compact = true
     private var added = false
 
@@ -49,7 +57,7 @@ class Overlay(
     private fun dp(v: Int): Int = (v * ctx.resources.displayMetrics.density + 0.5f).toInt()
 
     private val params = WindowManager.LayoutParams(
-        dp(250),
+        ctx.resources.displayMetrics.widthPixels - dp(16),
         WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -58,51 +66,65 @@ class Overlay(
 
     init {
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = dp(12)
-        params.y = topInset() + dp(4)
+        params.x = dp(8)
+        params.y = inset()
 
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(12), dp(10), dp(12), dp(10))
+        root.setPadding(dp(12), dp(6), dp(12), dp(6))
         val bg = GradientDrawable()
         bg.setColor(0xEB0F1A14.toInt())
-        bg.cornerRadius = dp(16).toFloat()
+        bg.cornerRadius = dp(14).toFloat()
         root.background = bg
 
-        bigTv.textSize = 26f
+        bigTv.textSize = 22f
         bigTv.setTypeface(Typeface.DEFAULT_BOLD)
         bigTv.setTextColor(Color.WHITE)
         bigTv.text = "Hazırdır"
+        bigTv.isSingleLine = true
 
         subTv.textSize = 12f
         subTv.setTextColor(0xFFB9C9BF.toInt())
         subTv.isSingleLine = true
-        subTv.ellipsize = android.text.TextUtils.TruncateAt.END
+        subTv.ellipsize = TextUtils.TruncateAt.END
+        subTv.gravity = Gravity.CENTER_VERTICAL
+        subTv.setPadding(dp(10), 0, 0, 0)
+
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        head.addView(bigTv)
+        head.addView(subTv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         handsTv.textSize = 13f
         handsTv.setTextColor(Color.WHITE)
-        handsTv.setPadding(0, dp(8), 0, 0)
+        handsTv.isSingleLine = true
+        handsTv.ellipsize = TextUtils.TruncateAt.END
 
         countTv.textSize = 12f
         countTv.setTextColor(0xFFB9C9BF.toInt())
-        countTv.setPadding(0, dp(2), 0, 0)
+        countTv.isSingleLine = true
+        countTv.ellipsize = TextUtils.TruncateAt.END
 
-        val buttons = LinearLayout(ctx)
+        diagTv.textSize = 10f
+        diagTv.setTextColor(0xFF7F9488.toInt())
+        diagTv.isSingleLine = true
+        diagTv.ellipsize = TextUtils.TruncateAt.END
+
         buttons.orientation = LinearLayout.HORIZONTAL
-        buttons.setPadding(0, dp(10), 0, 0)
+        buttons.setPadding(0, dp(4), 0, 0)
         buttons.addView(button("Say ↺") { onResetShoe() })
-        buttons.addView(button("Yeni") { onNewHand() })
+        buttons.addView(button("Yeni əl") { onNewHand() })
         buttons.addView(button("Debug") { onDebug() })
         buttons.addView(button("✕") { onStop() })
 
         details.orientation = LinearLayout.VERTICAL
         details.addView(handsTv)
         details.addView(countTv)
+        details.addView(diagTv)
         details.addView(buttons)
-
-        root.addView(bigTv)
-        root.addView(subTv)
-        root.addView(details)
         details.visibility = View.GONE
+
+        root.addView(head)
+        root.addView(details)
 
         root.setOnTouchListener(object : View.OnTouchListener {
             var startX = 0
@@ -128,13 +150,16 @@ class Overlay(
                             moved = true
                             manual = true
                         }
-                        params.x = startX + dx
-                        params.y = startY + dy
-                        if (added) wm.updateViewLayout(root, params)
+                        if (moved) {
+                            params.x = startX + dx
+                            params.y = startY + dy
+                            if (added) wm.updateViewLayout(root, params)
+                        }
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
                         if (!moved) toggleCompact()
+                        else root.post { onLayoutChanged() }
                         return true
                     }
                 }
@@ -150,7 +175,7 @@ class Overlay(
         tv.textSize = 11f
         tv.isSingleLine = true
         tv.gravity = Gravity.CENTER
-        tv.setPadding(dp(4), dp(9), dp(4), dp(9))
+        tv.setPadding(dp(4), dp(5), dp(4), dp(5))
         val bg = GradientDrawable()
         bg.setColor(0x33FFFFFF)
         bg.cornerRadius = dp(8).toFloat()
@@ -165,23 +190,20 @@ class Overlay(
     private fun toggleCompact() {
         compact = !compact
         details.visibility = if (compact) View.GONE else View.VISIBLE
-        manual = false
         root.post { onLayoutChanged() }
     }
 
-    private fun topInset(): Int {
+    /** Top edge of the window: just under the status bar. */
+    fun inset(): Int {
         val id = ctx.resources.getIdentifier("status_bar_height", "dimen", "android")
-        return if (id > 0) ctx.resources.getDimensionPixelSize(id) else dp(24)
+        val bar = if (id > 0) ctx.resources.getDimensionPixelSize(id) else dp(24)
+        return bar + dp(2)
     }
-
-    fun inset(): Int = topInset() + dp(4)
-
-    fun isCompact(): Boolean = compact
 
     /** Where the window is right now, in screen pixels. */
     fun bounds(): CardFinder.Box {
         val w = if (root.width > 0) root.width else params.width
-        val h = if (root.height > 0) root.height else dp(80)
+        val h = if (root.height > 0) root.height else dp(60)
         return CardFinder.Box(params.x, params.y, params.x + w, params.y + h)
     }
 
@@ -225,10 +247,11 @@ class Overlay(
         bigTv.text = s.big
         bigTv.setTextColor(s.color)
         subTv.text = s.sub
-        subTv.visibility = if (s.sub.isEmpty()) View.GONE else View.VISIBLE
-        handsTv.text = s.hands
-        countTv.text = s.count
+        handsTv.text = s.hands.replace("\n", "   ")
+        handsTv.visibility = if (s.hands.isEmpty()) View.GONE else View.VISIBLE
+        countTv.text = s.count.replace("\n", "   ")
         countTv.visibility = if (s.count.isEmpty()) View.GONE else View.VISIBLE
-        root.post { onLayoutChanged() }
+        diagTv.text = s.diag
+        diagTv.visibility = if (s.diag.isEmpty()) View.GONE else View.VISIBLE
     }
 }

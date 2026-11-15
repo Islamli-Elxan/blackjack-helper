@@ -19,13 +19,16 @@ class CardReader {
         val dealer: List<Int>,
         val player: List<Int>,
         val blobs: List<CardFinder.Box>,
-        val items: List<Item>
+        val items: List<Item>,
+        /** Short text for the window: what was found and how sure. */
+        val diag: String = ""
     )
 
     private val classifier = RankClassifier.load()
     private val cache = HashMap<Int, RankClassifier.Result>()
 
-    fun read(bmp: Bitmap): Reading {
+    /** @param cover screen rectangle of our own window; marks under it cannot be trusted */
+    fun read(bmp: Bitmap, cover: CardFinder.Box? = null): Reading {
         val w = bmp.width
         val h = bmp.height
         val y0 = (h * CROP_TOP).toInt()
@@ -44,9 +47,26 @@ class CardReader {
             if (!sure) unsure = true
             items.add(Item(g.box, g.zone, res.label.toString(), if (sure) rank else null, res.confidence))
         }
+        // cards without any readable corner (still sliding in, or hidden) are not an empty table
+        if (found.blobs.isNotEmpty() && items.isEmpty()) unsure = true
+        // anything our own window sits on is unreliable
+        if (cover != null) {
+            val pad = 12
+            val c = CardFinder.Box(cover.l - pad, cover.t - pad, cover.r + pad, cover.b + pad)
+            for (b in found.blobs) {
+                val top = CardFinder.Box(b.l, b.t, b.r, b.t + (0.10f * h).toInt())
+                if (Placer.overlap(c, top) > 0) unsure = true
+            }
+        }
         val dealer = items.filter { it.zone == 0 }.mapNotNull { it.rank }
         val player = items.filter { it.zone == 1 }.mapNotNull { it.rank }
-        return Reading(!unsure, dealer, player, found.blobs, items)
+        val sb = StringBuilder()
+        sb.append("kart ").append(found.blobs.size).append(": ")
+        for (it in items) {
+            sb.append(if (it.zone == 0) "D" else "M").append(it.text).append(Math.round(it.conf * 100)).append(' ')
+        }
+        if (unsure) sb.append("(əmin deyil)")
+        return Reading(!unsure, dealer, player, found.blobs, items, sb.toString().trim())
     }
 
     private fun classify(px: IntArray, w: Int, roiH: Int, yOff: Int, box: CardFinder.Box): RankClassifier.Result {

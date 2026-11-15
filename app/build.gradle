@@ -11,8 +11,8 @@ android {
         applicationId 'az.nexgen.bjhelper'
         minSdk 26
         targetSdk 34
-        versionCode 3
-        versionName '0.3'
+        versionCode 4
+        versionName '0.4'
     }
 
     // A fixed debug key, so every build is signed the same way and installs over the previous one.

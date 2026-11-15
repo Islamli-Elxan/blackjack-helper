@@ -41,7 +41,6 @@ class CaptureService : Service() {
         private const val NOTIF_ID = 17
         private const val TAG = "BJHelper"
         private const val TICK_MS = 450L
-        private const val PEEK_EVERY_MS = 1500L
         private const val PEEK_WAIT_MS = 190L
         private const val MEMORY_MS = 10_000L
 
@@ -72,7 +71,7 @@ class CaptureService : Service() {
     @Volatile private var ovBounds: CardFinder.Box? = null
     private var blobMemory: List<CardFinder.Box> = emptyList()
     private var blobMemoryAt = 0L
-    private var lastPeek = 0L
+    @Volatile private var diag = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -179,6 +178,7 @@ class CaptureService : Service() {
             onLayoutChanged = { onOverlayLayout() }
         )
         overlay?.show()
+        ui.postDelayed({ onOverlayLayout() }, 400)
 
         started = true
         hd.post {
@@ -245,50 +245,25 @@ class CaptureService : Service() {
     private fun tick() {
         val hd = handler ?: return
         try {
-            val now = SystemClock.elapsedRealtime()
-            val ob = ovBounds
-            val covered = ob != null && Placer.covers(ob, screenW, screenH, freshBlobs(now))
-            if (covered && now - lastPeek >= PEEK_EVERY_MS) {
-                // The window may hide a card: make it see-through for a moment and look.
-                lastPeek = now
-                drain()
-                ui.post { overlay?.setHidden(true) }
-                hd.postDelayed({ peekRead() }, PEEK_WAIT_MS)
-                return
-            }
+            // a still screen produces no new frame: keep reading the last one so the tracker sees time pass
             val fresh = grab()
             if (fresh != null) {
                 lastBitmap?.recycle()
                 lastBitmap = fresh
-                if (!covered) readFrame(fresh)
             }
+            val bmp = lastBitmap
+            if (bmp != null) readFrame(bmp)
         } catch (t: Throwable) {
             Log.e(TAG, "tick failed", t)
         }
         hd.postDelayed({ tick() }, TICK_MS)
     }
 
-    private fun peekRead() {
-        val hd = handler ?: return
-        try {
-            val fresh = grab()
-            ui.post { overlay?.setHidden(false) }
-            if (fresh != null) {
-                lastBitmap?.recycle()
-                lastBitmap = fresh
-                readFrame(fresh)
-            }
-        } catch (t: Throwable) {
-            Log.e(TAG, "peek failed", t)
-            ui.post { overlay?.setHidden(false) }
-        }
-        hd.postDelayed({ tick() }, TICK_MS)
-    }
-
     private fun readFrame(bmp: Bitmap) {
         val cr = cardReader ?: return
-        val rd = cr.read(bmp)
+        val rd = cr.read(bmp, ovBounds)
         lastReading = rd
+        diag = rd.diag
         val now = SystemClock.elapsedRealtime()
         if (rd.blobs.isNotEmpty()) {
             blobMemory = rd.blobs
@@ -297,8 +272,8 @@ class CaptureService : Service() {
         if (rd.ok) {
             tracker.onReading(rd.dealer, rd.player, now)
             tracker.tick(now)
-            publish()
         }
+        publish()
     }
 
     private fun label(r: Int): String = if (r == 11) "A" else r.toString()
@@ -380,7 +355,7 @@ class CaptureService : Service() {
             }
         }
 
-        val st = Overlay.UiState(big, sub, color, hands, count)
+        val st = Overlay.UiState(big, sub, color, hands, count, diag)
         ui.post { overlay?.render(st) }
     }
 

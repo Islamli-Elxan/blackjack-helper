@@ -5,7 +5,7 @@ package az.nexgen.bjhelper
  * A reading is accepted after it stays unchanged for [stableMs]. A round is added to the count
  * after the table has been empty for [clearMs].
  */
-class RoundTracker(private val stableMs: Long = 600L, private val clearMs: Long = 900L) {
+class RoundTracker(private val stableMs: Long = 600L, private val clearMs: Long = 2500L) {
 
     var baseRc = 0
         private set

@@ -11,7 +11,7 @@ import kotlin.math.min
 object Placer {
 
     /** Top of the area where cards can appear, as a fraction of the screen height. */
-    const val CARD_TOP = 0.15f
+    const val CARD_TOP = 0.18f
     /** Bottom of the card area (the game buttons start below it). */
     const val CARD_BOTTOM = 0.72f
     /** Cards are never in the outer side margins. */
