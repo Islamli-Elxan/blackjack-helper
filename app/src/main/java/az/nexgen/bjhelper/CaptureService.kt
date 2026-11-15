@@ -81,9 +81,6 @@ class CaptureService : Service() {
     private var blobMemory: List<CardFinder.Box> = emptyList()
     private var blobMemoryAt = 0L
     @Volatile private var diag = ""
-    private var stuckSince = 0L
-    private var autoDumps = 0
-    private var lastAutoDump = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -302,7 +299,13 @@ class CaptureService : Service() {
             // a row that could not be read this frame keeps what was accepted before
             val d = if (rd.dealerSure) rd.dealer else tracker.dealer
             val h = if (rd.playerSure) rd.hands else tracker.hands
-            tracker.onHands(d, h, now)
+            val fl = RoundTracker.Flags(
+                if (rd.dealerSure) rd.dealerVerified else false,
+                if (rd.playerSure) rd.playerVerified else false,
+                if (rd.dealerSure) rd.dealerApprox else tracker.dealerApprox,
+                if (rd.playerSure) rd.playerApprox else tracker.playerApprox
+            )
+            tracker.onHands(d, h, now, fl)
         }
         tracker.tick(now)
         if (rd.missed.isNotEmpty() && now - lastMissedAt >= 2000L) {
@@ -310,27 +313,7 @@ class CaptureService : Service() {
             log.note(rd.diag)
             for (m in rd.missed) log.missed(m)
         }
-        autoDump(bmp, rd, now)
         publish()
-    }
-
-    /** When a row stays unreadable for a while, save a picture once so the cause can be seen. */
-    private fun autoDump(bmp: Bitmap, rd: CardReader.Reading, now: Long) {
-        val stuck = !rd.dealerSure || !rd.playerSure ||
-            (rd.blobs.isNotEmpty() && tracker.dealer.isEmpty() && rd.dealer.isEmpty())
-        if (!stuck) {
-            stuckSince = 0L
-            return
-        }
-        if (stuckSince == 0L) stuckSince = now
-        if (now - stuckSince >= 4000L && autoDumps < 3 && now - lastAutoDump >= 30_000L) {
-            autoDumps++
-            lastAutoDump = now
-            val note = "AUTO " + rd.diag
-            DebugDump.saveRaw(this, bmp)
-            DebugDump.save(this, bmp, rd, note)
-            toast("Oxuma ilişib: 2 şəkil avtomatik saxlandı (Pictures/BlackjackHelper)")
-        }
     }
 
     private fun label(r: Int): String = if (r == 11) "A" else r.toString()
@@ -440,7 +423,7 @@ class CaptureService : Service() {
                     val kind = when {
                         a.act == "BUST" -> "Keçdi " + a.total
                         a.twentyOne -> "21"
-                        a.kind == "pair" -> "Cüt " + label(hand[0]) + "-" + label(hand[1])
+                        a.kind == "pair" && !tracker.playerApprox -> "Cüt " + label(hand[0]) + "-" + label(hand[1])
                         a.kind == "soft" -> "Soft " + a.total
                         else -> "Hard " + a.total
                     }
@@ -450,7 +433,8 @@ class CaptureService : Service() {
                     parts.add(if (advs.size > 1) (i + 1).toString() + ") " + t else t)
                     adviceCodes.add(a.act + ":" + a.kind + a.total)
                 }
-                sub = parts.joinToString(" · ") + " · diler " + label(d[0])
+                sub = parts.joinToString(" · ") + " · diler " + (if (tracker.dealerApprox) d[0].toString() else label(d[0])) +
+                    (if (tracker.playerApprox || tracker.dealerApprox) " · ədədə görə" else "")
             }
         }
 
@@ -494,7 +478,7 @@ class CaptureService : Service() {
         val statsLong = if (st.push > 0) "= " + st.push else ""
         val ui0 = Overlay.UiState(
             badge, big, sub, color, d, hands, totals, rcText, tcText, tcColor,
-            st.short(), statsLong, note, diag
+            st.short(), statsLong, note, diag, tracker.dealerApprox, tracker.playerApprox
         )
         ui.post { overlay?.render(ui0) }
     }

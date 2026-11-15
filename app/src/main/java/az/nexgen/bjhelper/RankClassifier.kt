@@ -19,7 +19,8 @@ class RankClassifier private constructor(
     private val w1: FloatArray,
     private val b1: FloatArray,
     private val w2: FloatArray,
-    private val b2: FloatArray
+    private val b2: FloatArray,
+    private val labels: String
 ) {
 
     class Result(val label: Char, val confidence: Float) {
@@ -62,17 +63,23 @@ class RankClassifier private constructor(
         }
         var best = 0
         for (k in 1 until nOut) if (out[k] > out[best]) best = k
-        return Result(LABELS[best], out[best] / sum)
+        return Result(labels[best], out[best] / sum)
     }
 
     companion object {
         const val GW = 16
         const val GH = 24
-        private const val LABELS = "A23456789TX"
+        private const val RANK_LABELS = "A23456789TX"
+        const val DIGIT_LABELS = "0123456789"
 
-        fun load(): RankClassifier {
-            val stream = RankClassifier::class.java.getResourceAsStream("/rank_model.bin")
-                ?: throw IllegalStateException("rank_model.bin missing")
+        fun load(): RankClassifier = load("/rank_model.bin", RANK_LABELS)
+
+        /** Reads the digits of the hand-total badges (italic, white on a dark disc). */
+        fun loadDigits(): RankClassifier = load("/digit_model.bin", DIGIT_LABELS)
+
+        private fun load(resource: String, labels: String): RankClassifier {
+            val stream = RankClassifier::class.java.getResourceAsStream(resource)
+                ?: throw IllegalStateException(resource + " missing")
             DataInputStream(stream.buffered()).use { d ->
                 val nIn = d.readInt()
                 val nHid = d.readInt()
@@ -86,7 +93,7 @@ class RankClassifier private constructor(
                 val b1 = floats(nHid)
                 val w2 = floats(nHid * nOut)
                 val b2 = floats(nOut)
-                return RankClassifier(nIn, nHid, nOut, w1, b1, w2, b2)
+                return RankClassifier(nIn, nHid, nOut, w1, b1, w2, b2, labels)
             }
         }
 

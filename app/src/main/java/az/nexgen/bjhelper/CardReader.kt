@@ -7,9 +7,10 @@ import kotlin.math.min
 /**
  * Finds the corner rank of each face-up card by colour ([CardFinder]) and reads each rank with
  * the built-in classifier ([RankClassifier]). Answers are cached by pixel content, so a static
- * table costs almost no work. When a row cannot be read, the marks are looked at again with a
- * different darkness limit (shadows on a card can glue a mark to its surroundings). A glyph the
- * classifier is not sure about is reported as unsure instead of guessed.
+ * table costs almost no work. A glyph the classifier is not sure about is reported as unsure
+ * instead of guessed. The hand totals printed by the game are read too ([BadgeReader]) and
+ * checked against the ranks ([Fusion]): they confirm a reading, and replace it when it is wrong
+ * or missing.
  */
 class CardReader {
 
@@ -34,7 +35,15 @@ class CardReader {
         val playerSure: Boolean = true,
         /** Where the corners are, for the report: "D:365 M:364,454,550". */
         val layout: String = "",
-        val missed: List<RoundLog.Missed> = emptyList()
+        val missed: List<RoundLog.Missed> = emptyList(),
+        /** The ranks agree with the printed total. */
+        val dealerVerified: Boolean = false,
+        val playerVerified: Boolean = false,
+        /** The hand comes from the printed total alone; its real cards are not known. */
+        val dealerApprox: Boolean = false,
+        val playerApprox: Boolean = false,
+        /** What the totals said, for the report: "d9 m15". */
+        val badges: String = ""
     )
 
     private val classifier = RankClassifier.load()
@@ -51,26 +60,8 @@ class CardReader {
         bmp.getPixels(px, 0, w, 0, y0, w, roiH)
 
         val found = CardFinder.find(px, w, roiH, h, y0)
-        var items = classifyAll(found.glyphs, px, w, roiH, y0, CardFinder.INK_LIMIT)
+        val items = classifyAll(found.glyphs, px, w, roiH, y0, CardFinder.INK_LIMIT)
         val zoneUnsure = flags(items, found.blobs, h)
-
-        // another darkness limit may separate the marks from a shadow
-        if (zoneUnsure[0] || zoneUnsure[1]) {
-            for (limit in RETRY_LIMITS) {
-                val again = CardFinder.find(px, w, roiH, h, y0, limit)
-                val items2 = classifyAll(again.glyphs, px, w, roiH, y0, limit)
-                val flags2 = flags(items2, found.blobs, h)
-                var fixed = false
-                for (z in 0..1) {
-                    if (zoneUnsure[z] && !flags2[z] && items2.any { it.zone == z && it.rank != null }) {
-                        items = items.filter { it.zone != z } + items2.filter { it.zone == z }
-                        zoneUnsure[z] = false
-                        fixed = true
-                    }
-                }
-                if (fixed && !zoneUnsure[0] && !zoneUnsure[1]) break
-            }
-        }
 
         // anything our own window sits on is unreliable
         if (cover != null) {
@@ -86,11 +77,28 @@ class CardReader {
         }
 
         val unsure = zoneUnsure[0] || zoneUnsure[1]
-        val dealer = items.filter { it.zone == 0 && it.rank != null }.sortedBy { it.box.l }.map { it.rank!! }
+        val rawDealer = items.filter { it.zone == 0 && it.rank != null }.sortedBy { it.box.l }.map { it.rank!! }
         val playerItems = items.filter { it.zone == 1 && it.rank != null }
         val gs = playerItems.map { Hands.G(it.box.l, it.box.t, it.box.b, it.rank!!) }
-        val hands = Hands.group(gs, found.blobs, w)
+        val rawHands = Hands.group(gs, found.blobs, w)
+
+        // the totals the game prints
+        val db = readBand(bmp, BadgeReader.DEALER_TOP, BadgeReader.DEALER_BOTTOM, cover)
+        val pb = readBand(bmp, BadgeReader.PLAYER_TOP, BadgeReader.PLAYER_BOTTOM, cover)
+        // a total with no card on the table is a leftover of the animation, not a hand
+        val dealerCards = found.blobs.any { (it.t + it.b) / 2f < CardFinder.DEALER_LIMIT * h }
+        val playerCards = found.blobs.any { (it.t + it.b) / 2f >= CardFinder.DEALER_LIMIT * h }
+        val dealerTotal = if (dealerCards && db.badges.size == 1) db.badges[0].value else null
+        val playerTotals = if (playerCards) pb.badges.sortedBy { it.cx }.map { it.value } else emptyList()
+        val dz = Fusion.dealer(rawDealer, !zoneUnsure[0], dealerTotal)
+        val pz = Fusion.player(rawHands, !zoneUnsure[1], playerTotals)
+        val dealer = dz.hands.firstOrNull() ?: emptyList()
+        val hands = pz.hands
         val player = hands.flatten()
+        val dealerSure = dz.sure
+        val playerSure = pz.sure
+        val badgeText = (if (db.badges.isEmpty()) "" else "d" + db.badges.joinToString(",") { it.value?.toString() ?: "?" }) +
+            (if (pb.badges.isEmpty()) "" else " m" + pb.badges.sortedBy { it.cx }.joinToString(",") { it.value?.toString() ?: "?" })
 
         val sb = StringBuilder()
         sb.append("kart ").append(found.blobs.size).append(": ")
@@ -99,9 +107,12 @@ class CardReader {
             sb.append(if (it.zone == 0) "D" else "M").append(it.text).append(Math.round(it.conf * 100)).append(' ')
         }
         if (unsure) sb.append(if (zoneUnsure[0]) "(diler?)" else "").append(if (zoneUnsure[1]) "(mən?)" else "")
+        if (badgeText.isNotEmpty()) sb.append(" [").append(badgeText).append(']')
 
         val layout = "D:" + items.filter { it.zone == 0 && it.rank != null }.sortedBy { it.box.l }.joinToString(",") { it.box.l.toString() } +
-            " M:" + playerItems.sortedBy { it.box.l }.joinToString(",") { it.box.l.toString() }
+            " M:" + playerItems.sortedBy { it.box.l }.joinToString(",") { it.box.l.toString() } +
+            (if (badgeText.isNotEmpty()) " B:" + badgeText else "") +
+            (if (dz.approx) " ~D" else "") + (if (pz.approx) " ~M" else "")
 
         val missed = ArrayList<RoundLog.Missed>()
         if (unsure) {
@@ -118,9 +129,22 @@ class CardReader {
         }
 
         return Reading(
-            !(zoneUnsure[0] && zoneUnsure[1]), dealer, player, hands, found.blobs, items, sb.toString().trim(),
-            !zoneUnsure[0], !zoneUnsure[1], layout, missed
+            dealerSure || playerSure, dealer, player, hands, found.blobs, items, sb.toString().trim(),
+            dealerSure, playerSure, layout, missed,
+            dz.verified, pz.verified, dz.approx, pz.approx, badgeText
         )
+    }
+
+    private fun readBand(bmp: Bitmap, top: Float, bottom: Float, cover: CardFinder.Box?): BadgeReader.Band {
+        val w = bmp.width
+        val h = bmp.height
+        val y0 = (top * h).toInt()
+        val y1 = (bottom * h).toInt()
+        val rows = y1 - y0
+        if (rows < 8) return BadgeReader.Band(emptyList(), false)
+        val px = IntArray(w * rows)
+        bmp.getPixels(px, 0, w, 0, y0, w, rows)
+        return BadgeReader.readBand(px, w, rows, y0, h, top, bottom, cover)
     }
 
     private fun classifyAll(
@@ -210,6 +234,5 @@ class CardReader {
     companion object {
         const val CROP_TOP = 0.08f
         const val CROP_BOTTOM = 0.74f
-        private val RETRY_LIMITS = intArrayOf(130, 100, 225)
     }
 }

@@ -44,7 +44,10 @@ class Overlay(
         val stats: String,
         val statsLong: String,
         val note: String,
-        val diag: String
+        val diag: String,
+        /** The dealer's / the player's hand is known only by the total the game prints. */
+        val dealerApprox: Boolean = false,
+        val playerApprox: Boolean = false
     )
 
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -351,12 +354,16 @@ class Overlay(
         handsRow.removeAllViews()
         if (s.dealer.isNotEmpty() || s.hands.isNotEmpty()) {
             handsRow.addView(tag("DİLER"))
-            for (c in s.dealer) handsRow.addView(cardChip(rankLabel(c)))
+            if (s.dealerApprox) {
+                if (s.dealer.isNotEmpty()) handsRow.addView(tag("~" + Strategy.evalHand(s.dealer).total, 0xFFF0C14B.toInt(), 13f))
+            } else {
+                for (c in s.dealer) handsRow.addView(cardChip(rankLabel(c)))
+            }
             handsRow.addView(tag("MƏN").also { it.setPadding(dp(10), 0, dp(5), 0) })
             for ((i, hand) in s.hands.withIndex()) {
                 if (i > 0) handsRow.addView(tag("│", 0xFF5E7368.toInt(), 14f).also { it.setPadding(dp(2), 0, dp(5), 0) })
-                for (c in hand) handsRow.addView(cardChip(rankLabel(c)))
-                if (i < s.totals.size) handsRow.addView(tag("=" + s.totals[i], 0xFFE6F0E9.toInt(), 12.5f))
+                if (!s.playerApprox) for (c in hand) handsRow.addView(cardChip(rankLabel(c)))
+                if (i < s.totals.size) handsRow.addView(tag((if (s.playerApprox) "~" else "=") + s.totals[i], if (s.playerApprox) 0xFFF0C14B.toInt() else 0xFFE6F0E9.toInt(), 12.5f))
             }
         } else {
             handsRow.addView(tag("Masa boşdur, kart gözləyirəm"))
