@@ -36,12 +36,13 @@ class CaptureService : Service() {
 
     companion object {
         @Volatile var running = false
+        @Volatile var resetStats = false
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"
         private const val CHANNEL = "capture"
         private const val NOTIF_ID = 17
         private const val TAG = "BJHelper"
-        private const val TICK_MS = 450L
+        private const val TICK_MS = 120L
         private const val PEEK_WAIT_MS = 190L
         private const val MEMORY_MS = 10_000L
 
@@ -62,6 +63,12 @@ class CaptureService : Service() {
     private val ui = Handler(Looper.getMainLooper())
     private var overlay: Overlay? = null
     private val tracker = RoundTracker()
+    private val log = RoundLog(formatTime = { RoundStore.fmt(it) })
+    private var layout = ""
+    private var lastMissedAt = 0L
+    private var savedRc = 0
+    private var savedCards = 0
+    private var version = "?"
     private var cardReader: CardReader? = null
     private var lastBitmap: Bitmap? = null
     private var lastReading: CardReader.Reading? = null
@@ -74,6 +81,9 @@ class CaptureService : Service() {
     private var blobMemory: List<CardFinder.Box> = emptyList()
     private var blobMemoryAt = 0L
     @Volatile private var diag = ""
+    private var stuckSince = 0L
+    private var autoDumps = 0
+    private var lastAutoDump = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -135,6 +145,16 @@ class CaptureService : Service() {
         val prefs = getSharedPreferences("bj", Context.MODE_PRIVATE)
         decks = prefs.getInt("decks", 6)
         countMode = prefs.getBoolean("count", true)
+        val prior = RoundStore.load(this)
+        log.start(prior.second, prior.first)
+        tracker.restore(prefs.getInt("shoeRc", 0), prefs.getInt("shoeCards", 0))
+        savedRc = tracker.baseRc
+        savedCards = tracker.baseCards
+        version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        } catch (t: Throwable) {
+            "?"
+        }
 
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val proj = try {
@@ -176,7 +196,6 @@ class CaptureService : Service() {
             onResetShoe = { hd.post { tracker.resetShoe(); publish() } },
             onNewHand = { hd.post { tracker.clearRound(); publish() } },
             onDebug = { hd.post { dumpDebug() } },
-            onBalance = { openBalance() },
             onStop = { stopSelf() },
             onLayoutChanged = { onOverlayLayout() }
         )
@@ -256,7 +275,12 @@ class CaptureService : Service() {
                 lastBitmap = fresh
             }
             val bmp = lastBitmap
-            if (bmp != null) readFrame(bmp)
+            if (fresh != null && bmp != null) {
+                readFrame(bmp)
+            } else if (bmp != null) {
+                // nothing changed on screen: only let time pass for the tracker
+                if (tracker.tick(SystemClock.elapsedRealtime())) publish()
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "tick failed", t)
         }
@@ -268,16 +292,45 @@ class CaptureService : Service() {
         val rd = cr.read(bmp, ovBounds)
         lastReading = rd
         diag = rd.diag
+        layout = rd.layout
         val now = SystemClock.elapsedRealtime()
         if (rd.blobs.isNotEmpty()) {
             blobMemory = rd.blobs
             blobMemoryAt = now
         }
         if (rd.ok) {
-            tracker.onReading(rd.dealer, rd.player, now)
-            tracker.tick(now)
+            // a row that could not be read this frame keeps what was accepted before
+            val d = if (rd.dealerSure) rd.dealer else tracker.dealer
+            val h = if (rd.playerSure) rd.hands else tracker.hands
+            tracker.onHands(d, h, now)
         }
+        tracker.tick(now)
+        if (rd.missed.isNotEmpty() && now - lastMissedAt >= 2000L) {
+            lastMissedAt = now
+            log.note(rd.diag)
+            for (m in rd.missed) log.missed(m)
+        }
+        autoDump(bmp, rd, now)
         publish()
+    }
+
+    /** When a row stays unreadable for a while, save a picture once so the cause can be seen. */
+    private fun autoDump(bmp: Bitmap, rd: CardReader.Reading, now: Long) {
+        val stuck = !rd.dealerSure || !rd.playerSure ||
+            (rd.blobs.isNotEmpty() && tracker.dealer.isEmpty() && rd.dealer.isEmpty())
+        if (!stuck) {
+            stuckSince = 0L
+            return
+        }
+        if (stuckSince == 0L) stuckSince = now
+        if (now - stuckSince >= 4000L && autoDumps < 3 && now - lastAutoDump >= 30_000L) {
+            autoDumps++
+            lastAutoDump = now
+            val note = "AUTO " + rd.diag
+            DebugDump.saveRaw(this, bmp)
+            DebugDump.save(this, bmp, rd, note)
+            toast("Oxuma ilişib: 2 şəkil avtomatik saxlandı (Pictures/BlackjackHelper)")
+        }
     }
 
     private fun label(r: Int): String = if (r == 11) "A" else r.toString()
@@ -285,8 +338,47 @@ class CaptureService : Service() {
     private fun joinCards(l: List<Int>): String =
         if (l.isEmpty()) "-" else l.joinToString(" ") { label(it) }
 
+    private fun word(act: String): String = when (act) {
+        "H" -> "Kart al"
+        "S" -> "Dayan"
+        "P" -> "Böl"
+        "BUST" -> "Keçdi"
+        "BJ" -> "21"
+        else -> "İkiqat"
+    }
+
+    private fun letter(act: String): String = when (act) {
+        "H" -> "H"
+        "S" -> "S"
+        "P" -> "P"
+        "BUST" -> "✕"
+        "BJ" -> "★"
+        else -> "D"
+    }
+
+    private fun tint(act: String): Int = when (act) {
+        "H" -> C_HIT
+        "S", "BJ" -> C_STAND
+        "P" -> C_SPLIT
+        "BUST" -> C_BUST
+        else -> C_DOUBLE
+    }
+
+    private fun resultWord(k: Outcome.Kind): String = when (k) {
+        Outcome.Kind.WIN, Outcome.Kind.DEALER_BUST -> "Qazandın"
+        Outcome.Kind.BLACKJACK -> "Blackjack!"
+        Outcome.Kind.LOSE, Outcome.Kind.BUST -> "Uduzdun"
+        Outcome.Kind.PUSH -> "Bərabər"
+    }
+
     private fun publish() {
+        if (resetStats) {
+            resetStats = false
+            log.start(1, RoundLog.Stats())
+        }
+        val now = SystemClock.elapsedRealtime()
         val d = tracker.dealer
+        val hands = tracker.hands
         val p = tracker.player
         val rc = tracker.rc()
         val seen = tracker.seen()
@@ -297,63 +389,74 @@ class CaptureService : Service() {
         var big = "Kart görünmür"
         var sub = "Oyun masasını aç"
         var color = NEUTRAL
+        val adviceCodes = ArrayList<String>()
 
-        val result = Outcome.decide(p, d)
-        if (result != null) {
-            val head = result.player.toString() + (if (result.dealer > 0) " : " + result.dealer else "")
-            when (result.kind) {
-                Outcome.Kind.WIN -> { badge = "✓"; big = "Qazandın"; color = C_WIN; sub = head }
-                Outcome.Kind.DEALER_BUST -> { badge = "✓"; big = "Qazandın"; color = C_WIN; sub = "Diler keçdi (" + result.dealer + ")" }
-                Outcome.Kind.BLACKJACK -> { badge = "★"; big = "Blackjack!"; color = C_WIN; sub = "3:2 ilə qazandın" }
-                Outcome.Kind.LOSE -> { badge = "✕"; big = "Uduzdun"; color = C_BUST; sub = head }
-                Outcome.Kind.BUST -> { badge = "✕"; big = "Uduzdun"; color = C_BUST; sub = "Keçdin (" + result.player + ")" }
-                Outcome.Kind.PUSH -> { badge = "="; big = "Bərabər"; color = NEUTRAL; sub = head }
+        val outcomes = log.outcomes(d, hands)
+        val decided = hands.isNotEmpty() && outcomes.all { it != null }
+        val ready = d.isNotEmpty() && hands.isNotEmpty() && hands.all { it.size >= 2 }
+
+        if (decided) {
+            val kinds = outcomes.map { it!!.kind }
+            val net = kinds.sumOf { k ->
+                when (k) {
+                    Outcome.Kind.WIN, Outcome.Kind.DEALER_BUST, Outcome.Kind.BLACKJACK -> 1
+                    Outcome.Kind.LOSE, Outcome.Kind.BUST -> -1
+                    Outcome.Kind.PUSH -> 0
+                }.toInt()
             }
-        } else if (d.isNotEmpty() || p.isNotEmpty()) {
-            if (d.isEmpty() || p.size < 2) {
+            color = if (net > 0) C_WIN else if (net < 0) C_BUST else NEUTRAL
+            badge = if (net > 0) "✓" else if (net < 0) "✕" else "="
+            big = kinds.joinToString(" · ") { resultWord(it) }
+            val first = outcomes[0]!!
+            sub = if (hands.size > 1) {
+                outcomes.joinToString(" · ") { it!!.player.toString() } + " | diler " + first.dealer
+            } else when (first.kind) {
+                Outcome.Kind.DEALER_BUST -> "Diler keçdi (" + first.dealer + ")"
+                Outcome.Kind.BLACKJACK -> "3:2 ilə"
+                Outcome.Kind.BUST -> "Keçdin (" + first.player + ")"
+                else -> first.player.toString() + " : " + first.dealer
+            }
+            for (h in hands) adviceCodes.add("-")
+        } else if (d.isNotEmpty() || hands.isNotEmpty()) {
+            if (!ready) {
                 badge = "…"
                 big = "Oxuyuram"
+                sub = diag
+                for (h in hands) adviceCodes.add("?")
+            } else if (d.size >= 2) {
+                badge = "…"
+                big = "Diler oynayır"
                 sub = ""
+                for (h in hands) adviceCodes.add("-")
             } else {
-                val a = Strategy.advise(p, d[0], false, countMode, tc)
-                if (a.act == "BUST") {
-                    badge = "✕"
-                    big = "Keçdin"
-                    sub = "BUST " + a.total
-                    color = C_BUST
-                } else if (a.act == "BJ") {
-                    badge = "★"
-                    big = "Blackjack!"
-                    sub = "21"
-                    color = C_STAND
-                } else if (d.size >= 2) {
-                    badge = "…"
-                    big = "Diler oynayır"
-                    sub = ""
-                } else {
-                    when (a.act) {
-                        "H" -> { badge = "H"; big = "Kart al"; color = C_HIT; sub = "HIT" }
-                        "S" -> { badge = "S"; big = "Dayan"; color = C_STAND; sub = "STAND" }
-                        "P" -> { badge = "P"; big = "Böl"; color = C_SPLIT; sub = "SPLIT" }
-                        else -> { badge = "D"; big = "İkiqat"; color = C_DOUBLE; sub = "DOUBLE" }
-                    }
+                val advs = hands.map { Strategy.advise(it, d[0], false, countMode, tc) }
+                val first = advs[0]
+                badge = letter(first.act)
+                color = tint(first.act)
+                big = advs.joinToString(" · ") { word(it.act) }
+                val parts = ArrayList<String>()
+                for ((i, a) in advs.withIndex()) {
+                    val hand = hands[i]
                     val kind = when {
+                        a.act == "BUST" -> "Keçdi " + a.total
                         a.twentyOne -> "21"
-                        a.kind == "pair" -> "Cüt " + label(p[0]) + "-" + label(p[1])
+                        a.kind == "pair" -> "Cüt " + label(hand[0]) + "-" + label(hand[1])
                         a.kind == "soft" -> "Soft " + a.total
                         else -> "Hard " + a.total
                     }
-                    sub = sub + " · " + kind + " · diler " + label(d[0])
-                    if (a.fallback == "H") sub += " (olmasa kart al)"
-                    if (a.fallback == "S") sub += " (olmasa dayan)"
+                    var t = kind
+                    if (a.fallback == "H") t += " (olmasa kart al)"
+                    if (a.fallback == "S") t += " (olmasa dayan)"
+                    parts.add(if (advs.size > 1) (i + 1).toString() + ") " + t else t)
+                    adviceCodes.add(a.act + ":" + a.kind + a.total)
                 }
+                sub = parts.joinToString(" · ") + " · diler " + label(d[0])
             }
         }
 
-        var total = ""
-        if (p.isNotEmpty()) {
-            val e = Strategy.evalHand(p)
-            total = e.total.toString() + (if (e.soft) " soft" else "")
+        val totals = hands.map {
+            val e = Strategy.evalHand(it)
+            e.total.toString() + (if (e.soft) "s" else "")
         }
 
         var rcText = ""
@@ -368,36 +471,32 @@ class CaptureService : Service() {
                 tc <= -1.0 -> 0xFFFF9F96.toInt()
                 else -> 0xFFE6F0E9.toInt()
             }
-            if (d.isNotEmpty() && d[0] == 11 && p.size >= 2) {
+            if (d.isNotEmpty() && d[0] == 11 && ready && !decided) {
                 note = "Sığorta: " + (if (tc >= 3.0) "götür" else "götürmə")
             }
         }
 
-        val prefs = getSharedPreferences("bj", Context.MODE_PRIVATE)
-        val balance = prefs.getLong("balance", 0L)
-        var bet = ""
-        if (balance > 0L) {
-            val plan = Betting.recommend(
-                balance, tc, countMode, prefs.getInt("risk", 1),
-                prefs.getLong("minBet", 0L), prefs.getLong("maxBet", 0L)
-            )
-            bet = Betting.format(plan.amount)
-        }
-
-        val st = Overlay.UiState(
-            badge, big, sub, color, d, p, total, rcText, tcText, tcColor, bet, note, diag
+        // the record of the round, and the counters
+        val finished = log.update(
+            now, System.currentTimeMillis(), d, hands, rc, tc, adviceCodes, layout, decks, countMode
         )
-        ui.post { overlay?.render(st) }
-    }
-
-    private fun openBalance() {
-        val i = Intent(this, BalanceActivity::class.java)
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try {
-            startActivity(i)
-        } catch (t: Throwable) {
-            Log.w(TAG, "balance dialog", t)
+        if (finished != null) {
+            RoundStore.append(this, log.toJson(finished, version, decks, countMode))
         }
+        if (tracker.baseRc != savedRc || tracker.baseCards != savedCards) {
+            savedRc = tracker.baseRc
+            savedCards = tracker.baseCards
+            getSharedPreferences("bj", Context.MODE_PRIVATE).edit()
+                .putInt("shoeRc", savedRc).putInt("shoeCards", savedCards).apply()
+        }
+
+        val st = log.stats
+        val statsLong = if (st.push > 0) "= " + st.push else ""
+        val ui0 = Overlay.UiState(
+            badge, big, sub, color, d, hands, totals, rcText, tcText, tcColor,
+            st.short(), statsLong, note, diag
+        )
+        ui.post { overlay?.render(ui0) }
     }
 
     private fun toast(msg: String) {
@@ -435,6 +534,10 @@ class CaptureService : Service() {
         started = false
         running = false
         handler?.removeCallbacksAndMessages(null)
+        handler?.post {
+            val r = log.update(0L, 0L, emptyList(), emptyList(), 0, 0.0, emptyList(), "", decks, countMode)
+            if (r != null) RoundStore.append(applicationContext, log.toJson(r, version, decks, countMode))
+        }
         thread?.quitSafely()
         try { virtualDisplay?.release() } catch (t: Throwable) { Log.w(TAG, "release display", t) }
         try { reader?.close() } catch (t: Throwable) { Log.w(TAG, "close reader", t) }

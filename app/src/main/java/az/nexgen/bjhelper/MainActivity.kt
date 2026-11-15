@@ -36,10 +36,12 @@ class MainActivity : Activity() {
     private lateinit var permText: TextView
     private lateinit var permBtn: TextView
     private lateinit var runBtn: TextView
-    private lateinit var preview: TextView
-    private lateinit var balanceField: EditText
-    private lateinit var minField: EditText
-    private lateinit var maxField: EditText
+    private lateinit var tileWin: TextView
+    private lateinit var tileLose: TextView
+    private lateinit var tilePush: TextView
+    private lateinit var tileBj: TextView
+    private lateinit var summary: TextView
+    private lateinit var recent: TextView
     private val ui = Handler(Looper.getMainLooper())
 
     private fun dp(v: Int): Int = Ui.dp(this, v)
@@ -89,73 +91,47 @@ class MainActivity : Activity() {
         steps.addView(runBtn)
         col.addView(steps)
 
-        // --- balance and bet
-        val bank = Ui.card(this)
-        bank.addView(Ui.text(this, "BALANS VƏ MƏRC", 11f, Ui.MUTED, true))
-        bank.addView(Ui.gap(this, 10))
-        bank.addView(Ui.text(this, "Oyundakı balansın (puan)", 13f, Ui.TEXT, true))
-        balanceField = numberField("məs. 25000")
-        val bal = p.getLong("balance", 0L)
-        if (bal > 0L) balanceField.setText(bal.toString())
-        bank.addView(balanceField)
-        bank.addView(Ui.gap(this, 12))
-
-        bank.addView(Ui.text(this, "Risk səviyyəsi", 13f, Ui.TEXT, true))
-        bank.addView(Ui.gap(this, 6))
-        bank.addView(Ui.Segmented(this, Betting.RISK_NAMES.toList(), p.getInt("risk", 1)) {
-            prefs().edit().putInt("risk", it).apply()
-            updatePreview()
-        }.view)
-        bank.addView(Ui.gap(this, 12))
-
-        val limits = LinearLayout(this)
-        limits.orientation = LinearLayout.HORIZONTAL
-        val minCol = LinearLayout(this)
-        minCol.orientation = LinearLayout.VERTICAL
-        minCol.addView(Ui.text(this, "Ən az mərc", 12f, Ui.MUTED))
-        minField = numberField("istəyə görə")
-        minField.textSize = 15f
-        val mn = p.getLong("minBet", 0L)
-        if (mn > 0L) minField.setText(mn.toString())
-        minCol.addView(minField)
-        val maxCol = LinearLayout(this)
-        maxCol.orientation = LinearLayout.VERTICAL
-        maxCol.addView(Ui.text(this, "Ən çox mərc", 12f, Ui.MUTED))
-        maxField = numberField("istəyə görə")
-        maxField.textSize = 15f
-        val mx = p.getLong("maxBet", 0L)
-        if (mx > 0L) maxField.setText(mx.toString())
-        maxCol.addView(maxField)
-        val l1 = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        l1.setMargins(0, 0, dp(6), 0)
-        val l2 = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        l2.setMargins(dp(6), 0, 0, 0)
-        limits.addView(minCol, l1)
-        limits.addView(maxCol, l2)
-        bank.addView(limits)
-        bank.addView(Ui.gap(this, 12))
-
-        preview = Ui.text(this, "", 12.5f, Ui.MUTED)
-        preview.setPadding(dp(12), dp(10), dp(12), dp(10))
-        preview.background = Ui.rounded(this, Ui.FIELD, 12, Ui.CARD_LINE)
-        bank.addView(preview)
-        col.addView(bank)
-
-        val watcher = object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                prefs().edit()
-                    .putLong("balance", balanceField.text.toString().toLongOrNull() ?: 0L)
-                    .putLong("minBet", minField.text.toString().toLongOrNull() ?: 0L)
-                    .putLong("maxBet", maxField.text.toString().toLongOrNull() ?: 0L)
-                    .apply()
-                updatePreview()
-            }
-        }
-        balanceField.addTextChangedListener(watcher)
-        minField.addTextChangedListener(watcher)
-        maxField.addTextChangedListener(watcher)
+        // --- report
+        val rep = Ui.card(this)
+        rep.addView(Ui.text(this, "HESABAT", 11f, Ui.MUTED, true))
+        rep.addView(Ui.gap(this, 10))
+        val tiles = LinearLayout(this)
+        tiles.orientation = LinearLayout.HORIZONTAL
+        tileWin = tile(tiles, "Qazanc", Ui.GREEN)
+        tileLose = tile(tiles, "Uduzma", 0xFFFF9F96.toInt())
+        tilePush = tile(tiles, "Bərabər", Ui.TEXT)
+        tileBj = tile(tiles, "Blackjack", Ui.GOLD)
+        rep.addView(tiles)
+        rep.addView(Ui.gap(this, 8))
+        summary = Ui.text(this, "", 13f, Ui.TEXT, true)
+        rep.addView(summary)
+        rep.addView(Ui.gap(this, 10))
+        recent = Ui.text(this, "", 12.5f, Ui.MUTED)
+        recent.setLineSpacing(0f, 1.2f)
+        recent.setPadding(dp(12), dp(10), dp(12), dp(10))
+        recent.background = Ui.rounded(this, Ui.FIELD, 12, Ui.CARD_LINE)
+        rep.addView(recent)
+        rep.addView(Ui.gap(this, 12))
+        val repButtons = LinearLayout(this)
+        repButtons.orientation = LinearLayout.HORIZONTAL
+        val send = Ui.button(this, "Hesabatı göndər", Ui.GOLD, 0xFF2A1D00.toInt()) { sendReport() }
+        send.textSize = 14f
+        val wipe = Ui.button(this, "Sıfırla", Ui.FIELD, 0xFFFF9F96.toInt()) { confirmReset() }
+        wipe.textSize = 14f
+        val s1 = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.6f)
+        s1.setMargins(0, 0, dp(6), 0)
+        repButtons.addView(send, s1)
+        repButtons.addView(wipe, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        rep.addView(repButtons)
+        rep.addView(Ui.gap(this, 8))
+        rep.addView(
+            Ui.text(
+                this,
+                "Hər raundun kartları, tövsiyələri və nəticəsi saxlanır. Bir neçə raunddan sonra hesabatı Claude-a göndər, strategiyanı yoxlasın.",
+                11.5f, Ui.MUTED
+            )
+        )
+        col.addView(rep)
 
         // --- game
         val game = Ui.card(this)
@@ -201,8 +177,8 @@ class MainActivity : Activity() {
             Ui.text(
                 this,
                 "•  Pəncərəyə toxun: əllər, say və düymələr açılır. Sürüşdürsən yerini dəyişir.\n" +
-                    "•  ◉ işarəli rəqəm növbəti əl üçün tövsiyə olunan mərcdir.\n" +
-                    "•  Balans dəyişəndə pəncərədəki Balans düyməsi ilə yenilə.\n" +
+                    "•  Pəncərənin sağındakı 23W 17L qazanc və uduzma sayıdır.\n" +
+                    "•  Əl bölünəndə hər əl üçün tövsiyə ardıcıl göstərilir.\n" +
                     "•  Android 14 və yuxarıda ekran paylaşanda \"Bir tətbiq\" seçib oyunu göstər, " +
                     "pəncərə görüntüyə düşməz.\n" +
                     "•  Səhv oxuyursa pəncərədə Debug düyməsinə bas və Pictures/BlackjackHelper şəkillərini göndər.",
@@ -216,7 +192,6 @@ class MainActivity : Activity() {
         scroll.addView(col)
         setContentView(scroll)
 
-        updatePreview()
 
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -254,33 +229,88 @@ class MainActivity : Activity() {
         return row
     }
 
-    private fun numberField(hint: String): EditText {
-        val f = EditText(this)
-        f.inputType = InputType.TYPE_CLASS_NUMBER
-        f.setTextColor(Ui.TEXT)
-        f.setHintTextColor(0xFF5E7368.toInt())
-        f.hint = hint
-        f.textSize = 18f
-        f.isSingleLine = true
-        f.background = Ui.rounded(this, Ui.FIELD, 12, Ui.CARD_LINE)
-        f.setPadding(dp(14), dp(11), dp(14), dp(11))
-        return f
+    private fun tile(parent: LinearLayout, label: String, color: Int): TextView {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.gravity = Gravity.CENTER
+        box.setPadding(0, dp(10), 0, dp(10))
+        box.background = Ui.rounded(this, Ui.FIELD, 12, Ui.CARD_LINE)
+        val v = Ui.text(this, "0", 24f, color, true)
+        v.gravity = Gravity.CENTER
+        box.addView(v)
+        val l = Ui.text(this, label, 11f, Ui.MUTED)
+        l.gravity = Gravity.CENTER
+        box.addView(l)
+        val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        lp.setMargins(dp(3), 0, dp(3), 0)
+        parent.addView(box, lp)
+        return v
     }
 
-    private fun updatePreview() {
-        val p = prefs()
-        val bal = p.getLong("balance", 0L)
-        if (bal <= 0L) {
-            preview.text = "Balansı yaz, hər əl üçün neçə puanla oynamalı olduğunu göstərim."
+    private fun kindWord(k: String): String = when (k) {
+        "WIN", "DEALER_BUST" -> "Qazandı"
+        "BLACKJACK" -> "Blackjack"
+        "LOSE", "BUST" -> "Uduzdu"
+        "PUSH" -> "Bərabər"
+        else -> "?"
+    }
+
+    private fun cards(l: List<Int>): String = l.joinToString(" ") { if (it == 11) "A" else it.toString() }
+
+    private fun refreshReport() {
+        val (st, _) = RoundStore.load(this)
+        tileWin.text = st.win.toString()
+        tileLose.text = st.lose.toString()
+        tilePush.text = st.push.toString()
+        tileBj.text = st.blackjack.toString()
+        summary.text = if (st.hands == 0) "Hələ nəticə yoxdur" else
+            "Cəmi " + st.hands + " əl  ·  qazanma " + String.format(java.util.Locale.US, "%.1f", st.winRate()) + "%"
+        val list = RoundStore.recent(this, 8)
+        if (list.isEmpty()) {
+            recent.text = "Son raundlar burada görünəcək."
+        } else {
+            val sb = StringBuilder()
+            for (r in list) {
+                val time = if (r.time.length >= 16) r.time.substring(11, 16) else r.time
+                sb.append(time).append("  D: ").append(cards(r.dealer)).append("  |  M: ")
+                    .append(r.hands.joinToString(" / ") { cards(it) })
+                    .append("  →  ")
+                    .append(if (r.kinds.isEmpty()) "bitməyib" else r.kinds.joinToString(" · ") { kindWord(it) })
+                    .append('\n')
+            }
+            recent.text = sb.toString().trimEnd()
+        }
+    }
+
+    private fun sendReport() {
+        val (st, _) = RoundStore.load(this)
+        val uri = RoundStore.export(this)
+        if (uri == null) {
+            Toast.makeText(this, "Hesabatı saxlamaq alınmadı", Toast.LENGTH_LONG).show()
             return
         }
-        val risk = p.getInt("risk", 1)
-        val mn = p.getLong("minBet", 0L)
-        val mx = p.getLong("maxBet", 0L)
-        fun bet(tc: Double) = Betting.format(Betting.recommend(bal, tc, true, risk, mn, mx).amount)
-        val flat = Betting.format(Betting.recommend(bal, 0.0, false, risk, mn, mx).amount)
-        preview.text = "Say yoxdur / aşağıdırsa: " + flat + " puan\n" +
-            "TC +3: " + bet(3.0) + "   ·   TC +5: " + bet(5.0) + "   ·   TC +7: " + bet(7.0)
+        Toast.makeText(this, "Yükləmələr (Downloads) qovluğunda saxlandı", Toast.LENGTH_LONG).show()
+        if (Build.VERSION.SDK_INT >= 29) {
+            val send = Intent(Intent.ACTION_SEND)
+            send.type = "text/plain"
+            send.putExtra(Intent.EXTRA_STREAM, uri)
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(send, "Hesabatı göndər"))
+        }
+        if (st.rounds == 0) Toast.makeText(this, "Hələ raund yoxdur, hesabat boşdur", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun confirmReset() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Sıfırlansın?")
+            .setMessage("Bütün say və raund qeydləri silinəcək. Əvvəl hesabatı göndərmisənsə davam et.")
+            .setPositiveButton("Sıfırla") { _, _ ->
+                RoundStore.clear(this)
+                CaptureService.resetStats = true
+                refreshReport()
+            }
+            .setNegativeButton("Ləğv", null)
+            .show()
     }
 
     override fun onResume() {
@@ -290,6 +320,7 @@ class MainActivity : Activity() {
     }
 
     private fun refresh() {
+        refreshReport()
         val ok = Settings.canDrawOverlays(this)
         permDot.background = Ui.rounded(this, if (ok) Ui.GREEN else Ui.GOLD, 14)
         permDot.text = if (ok) "✓" else "1"

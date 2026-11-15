@@ -112,4 +112,24 @@ class StrategyTest {
         t.tick(1500L)
         assertEquals(listOf(5, 10), t.player)
     }
+
+    @Test
+    fun trackerKeepsSplitHands() {
+        val t = RoundTracker(stableMs = 300L, clearMs = 900L)
+        t.onHands(listOf(10), listOf(listOf(8, 8)), 0L)
+        t.tick(400L)
+        assertEquals(listOf(listOf(8, 8)), t.hands)
+        // split: same two cards, now in two hands
+        t.onHands(listOf(10), listOf(listOf(8), listOf(8)), 500L)
+        t.tick(900L)
+        assertEquals(listOf(listOf(8), listOf(8)), t.hands)
+        assertEquals(listOf(8, 8), t.player)
+        // a card hidden for a moment does not shrink the round
+        t.onHands(listOf(10), listOf(listOf(8)), 1000L)
+        t.tick(1400L)
+        assertEquals(listOf(listOf(8), listOf(8)), t.hands)
+        t.onHands(listOf(10), listOf(listOf(8, 3), listOf(8, 2)), 1500L)
+        t.tick(1900L)
+        assertEquals(listOf(listOf(8, 3), listOf(8, 2)), t.hands)
+    }
 }

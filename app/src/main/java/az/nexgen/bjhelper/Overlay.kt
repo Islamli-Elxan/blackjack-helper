@@ -17,7 +17,7 @@ import kotlin.math.abs
 
 /**
  * Wide, low window along the top of the screen, above the dealer's cards, so it never covers a card.
- * Closed: a round action badge, the advice, and the recommended bet.
+ * Closed: a round action badge, the advice, and the win/lose count.
  * Tap to open: both hands as small cards, the count and the buttons. Drag to move it.
  */
 class Overlay(
@@ -25,7 +25,6 @@ class Overlay(
     private val onResetShoe: () -> Unit,
     private val onNewHand: () -> Unit,
     private val onDebug: () -> Unit,
-    private val onBalance: () -> Unit,
     private val onStop: () -> Unit,
     private val onLayoutChanged: () -> Unit = {}
 ) {
@@ -36,12 +35,14 @@ class Overlay(
         val sub: String,
         val color: Int,
         val dealer: List<Int>,
-        val player: List<Int>,
-        val total: String,
+        val hands: List<List<Int>>,
+        val totals: List<String>,
         val rc: String,
         val tc: String,
         val tcColor: Int,
-        val bet: String,
+        /** Short win/lose text such as "23W 17L". */
+        val stats: String,
+        val statsLong: String,
         val note: String,
         val diag: String
     )
@@ -108,7 +109,7 @@ class Overlay(
         subTv.ellipsize = TextUtils.TruncateAt.END
         subTv.setPadding(dp(8), 0, dp(6), 0)
 
-        betTv.textSize = 15f
+        betTv.textSize = 13f
         betTv.setTypeface(Typeface.DEFAULT_BOLD)
         betTv.setTextColor(0xFF2A1D00.toInt())
         betTv.isSingleLine = true
@@ -133,7 +134,6 @@ class Overlay(
 
         buttons.orientation = LinearLayout.HORIZONTAL
         buttons.gravity = Gravity.CENTER_VERTICAL
-        buttons.addView(button("Balans") { onBalance() })
         buttons.addView(button("Say ↺") { onResetShoe() })
         buttons.addView(button("Yeni") { onNewHand() })
         buttons.addView(button("Debug") { onDebug() })
@@ -345,21 +345,25 @@ class Overlay(
         bigTv.setTextColor(accent)
         subTv.text = s.sub
         subTv.visibility = if (compact && s.sub.isNotEmpty()) View.VISIBLE else View.GONE
-        betTv.text = if (s.bet.isEmpty()) "" else "◉ " + s.bet
-        betTv.visibility = if (s.bet.isEmpty()) View.GONE else View.VISIBLE
+        betTv.text = s.stats
+        betTv.visibility = if (s.stats.isEmpty()) View.GONE else View.VISIBLE
 
         handsRow.removeAllViews()
-        if (s.dealer.isNotEmpty() || s.player.isNotEmpty()) {
+        if (s.dealer.isNotEmpty() || s.hands.isNotEmpty()) {
             handsRow.addView(tag("DİLER"))
             for (c in s.dealer) handsRow.addView(cardChip(rankLabel(c)))
             handsRow.addView(tag("MƏN").also { it.setPadding(dp(10), 0, dp(5), 0) })
-            for (c in s.player) handsRow.addView(cardChip(rankLabel(c)))
-            if (s.total.isNotEmpty()) handsRow.addView(tag("= " + s.total, 0xFFE6F0E9.toInt(), 13f))
+            for ((i, hand) in s.hands.withIndex()) {
+                if (i > 0) handsRow.addView(tag("│", 0xFF5E7368.toInt(), 14f).also { it.setPadding(dp(2), 0, dp(5), 0) })
+                for (c in hand) handsRow.addView(cardChip(rankLabel(c)))
+                if (i < s.totals.size) handsRow.addView(tag("=" + s.totals[i], 0xFFE6F0E9.toInt(), 12.5f))
+            }
         } else {
             handsRow.addView(tag("Masa boşdur, kart gözləyirəm"))
         }
 
         pills.removeAllViews()
+        if (s.statsLong.isNotEmpty()) pills.addView(pill(s.statsLong, 0xFFF0C14B.toInt()))
         if (s.rc.isNotEmpty()) pills.addView(pill("RC " + s.rc, 0xFFE6F0E9.toInt()))
         if (s.tc.isNotEmpty()) pills.addView(pill("TC " + s.tc, s.tcColor))
         if (s.note.isNotEmpty()) pills.addView(pill(s.note, 0xFFF0C14B.toInt()))

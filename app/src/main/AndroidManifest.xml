@@ -23,13 +23,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".BalanceActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:theme="@android:style/Theme.DeviceDefault.Dialog" />
-
         <service
             android:name=".CaptureService"
             android:exported="false"

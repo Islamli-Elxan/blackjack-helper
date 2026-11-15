@@ -33,12 +33,15 @@ object CardFinder {
         return mn >= 200 && mx - mn <= 45
     }
 
-    fun isInk(p: Int): Boolean {
+    const val INK_LIMIT = 190
+
+    /** Dark or strongly red. A lower [limit] ignores shadows on the card, a higher one catches grey marks. */
+    fun isInk(p: Int, limit: Int = INK_LIMIT): Boolean {
         val r = (p shr 16) and 0xFF
         val g = (p shr 8) and 0xFF
         val b = p and 0xFF
         val mx = max(r, max(g, b))
-        return mx < 190 || r - max(g, b) > 60
+        return mx < limit || r - max(g, b) > 60
     }
 
     /**
@@ -46,10 +49,10 @@ object CardFinder {
      * @param w width of the area, roiH its height, fullH the height of the whole screen,
      * yOff the screen row where the area starts
      */
-    fun find(px: IntArray, w: Int, roiH: Int, fullH: Int, yOff: Int): Result {
+    fun find(px: IntArray, w: Int, roiH: Int, fullH: Int, yOff: Int, inkLimit: Int = INK_LIMIT): Result {
         val blobs = findBlobs(px, w, roiH, fullH, yOff)
         val comps = ArrayList<Box>()
-        for (blob in blobs) collectGlyphs(px, w, roiH, fullH, yOff, blob, comps)
+        for (blob in blobs) collectGlyphs(px, w, roiH, fullH, yOff, blob, comps, inkLimit)
 
         val glyphs = ArrayList<Glyph>()
         for (zone in 0..1) {
@@ -167,7 +170,7 @@ object CardFinder {
 
     /** Dark or red marks of rank-glyph size in the top band of a card blob. */
     private fun collectGlyphs(
-        px: IntArray, w: Int, roiH: Int, fullH: Int, yOff: Int, blob: Box, out: MutableList<Box>
+        px: IntArray, w: Int, roiH: Int, fullH: Int, yOff: Int, blob: Box, out: MutableList<Box>, inkLimit: Int
     ) {
         val x0 = max(blob.l, 0)
         val x1 = min(blob.r, w)
@@ -181,7 +184,7 @@ object CardFinder {
         val ink = BooleanArray(n)
         for (y in 0 until bh) {
             val row = (ry0 + y) * w + x0
-            for (x in 0 until bw) ink[y * bw + x] = isInk(px[row + x])
+            for (x in 0 until bw) ink[y * bw + x] = isInk(px[row + x], inkLimit)
         }
 
         val seen = BooleanArray(n)
