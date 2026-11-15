@@ -24,8 +24,8 @@ class HandsTest {
 
     @Test
     fun separateBlobsStartASecondHand() {
-        val a = CardFinder.Box(100, 1160, 330, 1570)
-        val b = CardFinder.Box(380, 1160, 700, 1570)
+        val a = CardFinder.Box(100, 1160, 260, 1570)
+        val b = CardFinder.Box(262, 1160, 700, 1570)
         // 150 px apart is more than a fan step, and the corners sit in different blobs
         val hands = Hands.group(listOf(g(120, 9), g(270, 9)), listOf(a, b), w)
         assertEquals(listOf(listOf(9), listOf(9)), hands)
