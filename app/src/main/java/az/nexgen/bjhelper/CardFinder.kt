@@ -50,7 +50,7 @@ object CardFinder {
      * yOff the screen row where the area starts
      */
     fun find(px: IntArray, w: Int, roiH: Int, fullH: Int, yOff: Int, inkLimit: Int = INK_LIMIT): Result {
-        val blobs = findBlobs(px, w, roiH, fullH, yOff)
+        val blobs = extendUp(findBlobs(px, w, roiH, fullH, yOff), px, w, roiH, fullH, yOff)
         val comps = ArrayList<Box>()
         for (blob in blobs) collectGlyphs(px, w, roiH, fullH, yOff, blob, comps, inkLimit)
 
@@ -88,6 +88,42 @@ object CardFinder {
             }
         }
         return Result(blobs, glyphs)
+    }
+
+    /**
+     * A dark or red rank with its suit underneath can cut the narrow visible strip of a card, so the
+     * cream blob starts below the rank. Walk up from the blob's top while the rows still look like
+     * card (some cream), and take the highest row that is almost all cream (the card's top margin).
+     */
+    private fun extendUp(blobs: List<Box>, px: IntArray, w: Int, roiH: Int, fullH: Int, yOff: Int): List<Box> {
+        val bs = max(3, Math.round(w / 270f))
+        val out = ArrayList<Box>()
+        for (b in blobs) {
+            val x0 = max(b.l + bs, 0)
+            val x1 = min(b.r - bs, w)
+            if (x1 - x0 < 4) {
+                out.add(b)
+                continue
+            }
+            val lo = max(yOff, b.t - (0.06f * fullH).toInt())
+            var newTop = b.t
+            var y = b.t - 1
+            while (y >= lo) {
+                val ry = y - yOff
+                if (ry < 0 || ry >= roiH) break
+                var cnt = 0
+                val row = ry * w
+                for (x in x0 until x1) {
+                    if (isCream(px[row + x])) cnt++
+                }
+                val fr = cnt.toFloat() / (x1 - x0)
+                if (fr < 0.12f) break
+                if (fr >= 0.7f) newTop = y
+                y--
+            }
+            out.add(if (newTop == b.t) b else Box(b.l, newTop, b.r, b.b))
+        }
+        return out
     }
 
     private fun zoneOf(c: Box, fullH: Int): Int =

@@ -128,4 +128,44 @@ class CardFinderTest {
         assertEquals(listOf(10), dealer)
         assertEquals(listOf(10, 4, 2), player)
     }
+
+    @Test
+    fun marksThatCutTheCardStripAreStillFound() {
+        // dealer red 10 over a face-down card, player black J under a 2: the rank and its suit cut each
+        // narrow strip, so the cream blob starts below the rank
+        val stream = javaClass.getResourceAsStream("/table_split_roi.rgb.gz")
+        val raw = GZIPInputStream(stream).readBytes()
+        val rh = 1220
+        val oy = 400
+        assertEquals(w * rh * 3, raw.size)
+        val px = IntArray(w * rh)
+        for (i in px.indices) {
+            val r = raw[i * 3].toInt() and 0xFF
+            val g = raw[i * 3 + 1].toInt() and 0xFF
+            val b = raw[i * 3 + 2].toInt() and 0xFF
+            px[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        val res = CardFinder.find(px, w, rh, h, oy)
+        val clf = RankClassifier.load()
+        val dealer = ArrayList<Int>()
+        val player = ArrayList<Int>()
+        for (g in res.glyphs) {
+            val gw = g.box.w
+            val gh = g.box.h
+            val mask = BooleanArray(gw * gh)
+            for (y in 0 until gh) {
+                for (x in 0 until gw) {
+                    mask[y * gw + x] = CardFinder.isInk(px[(g.box.t - oy + y) * w + g.box.l + x])
+                }
+            }
+            val r = clf.classify(mask, gw, gh)
+            val verdict = GlyphJudge.judge(r)
+            assertTrue("unsure glyph " + r.label + " " + r.confidence, verdict != GlyphJudge.Verdict.UNSURE)
+            if (verdict == GlyphJudge.Verdict.RANK) {
+                (if (g.zone == 0) dealer else player).add(r.rank!!)
+            }
+        }
+        assertEquals(listOf(10), dealer)
+        assertEquals(listOf(10, 2), player)
+    }
 }
