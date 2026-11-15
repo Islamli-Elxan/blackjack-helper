@@ -42,13 +42,13 @@ class CardReader {
         var unsure = false
         for (g in found.glyphs) {
             val res = classify(px, w, roiH, y0, g.box)
-            val rank = res.rank
-            val sure = rank != null && res.confidence >= MIN_CONF
-            if (!sure) unsure = true
-            items.add(Item(g.box, g.zone, res.label.toString(), if (sure) rank else null, res.confidence))
+            val verdict = GlyphJudge.judge(res)
+            if (verdict == GlyphJudge.Verdict.UNSURE) unsure = true
+            val rank = if (verdict == GlyphJudge.Verdict.RANK) res.rank else null
+            items.add(Item(g.box, g.zone, res.label.toString(), rank, res.confidence))
         }
         // cards without any readable corner (still sliding in, or hidden) are not an empty table
-        if (found.blobs.isNotEmpty() && items.isEmpty()) unsure = true
+        if (found.blobs.isNotEmpty() && items.none { it.rank != null }) unsure = true
         // anything our own window sits on is unreliable
         if (cover != null) {
             val pad = 12
@@ -63,6 +63,7 @@ class CardReader {
         val sb = StringBuilder()
         sb.append("kart ").append(found.blobs.size).append(": ")
         for (it in items) {
+            if (it.text == "X" && it.conf >= GlyphJudge.MIN_CONF) continue
             sb.append(if (it.zone == 0) "D" else "M").append(it.text).append(Math.round(it.conf * 100)).append(' ')
         }
         if (unsure) sb.append("(əmin deyil)")
@@ -98,6 +99,5 @@ class CardReader {
     companion object {
         const val CROP_TOP = 0.08f
         const val CROP_BOTTOM = 0.74f
-        const val MIN_CONF = 0.6f
     }
 }

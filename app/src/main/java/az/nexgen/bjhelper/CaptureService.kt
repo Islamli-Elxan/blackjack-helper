@@ -51,6 +51,7 @@ class CaptureService : Service() {
         private val C_DOUBLE = 0xFFAAC2FF.toInt()
         private val C_SPLIT = 0xFFD8B6FF.toInt()
         private val C_BUST = 0xFFFF9F96.toInt()
+        private val C_WIN = 0xFF7FE3A2.toInt()
     }
 
     private var projection: MediaProjection? = null
@@ -297,7 +298,18 @@ class CaptureService : Service() {
         var sub = "Oyun masasını aç"
         var color = NEUTRAL
 
-        if (d.isNotEmpty() || p.isNotEmpty()) {
+        val result = Outcome.decide(p, d)
+        if (result != null) {
+            val head = result.player.toString() + (if (result.dealer > 0) " : " + result.dealer else "")
+            when (result.kind) {
+                Outcome.Kind.WIN -> { badge = "✓"; big = "Qazandın"; color = C_WIN; sub = head }
+                Outcome.Kind.DEALER_BUST -> { badge = "✓"; big = "Qazandın"; color = C_WIN; sub = "Diler keçdi (" + result.dealer + ")" }
+                Outcome.Kind.BLACKJACK -> { badge = "★"; big = "Blackjack!"; color = C_WIN; sub = "3:2 ilə qazandın" }
+                Outcome.Kind.LOSE -> { badge = "✕"; big = "Uduzdun"; color = C_BUST; sub = head }
+                Outcome.Kind.BUST -> { badge = "✕"; big = "Uduzdun"; color = C_BUST; sub = "Keçdin (" + result.player + ")" }
+                Outcome.Kind.PUSH -> { badge = "="; big = "Bərabər"; color = NEUTRAL; sub = head }
+            }
+        } else if (d.isNotEmpty() || p.isNotEmpty()) {
             if (d.isEmpty() || p.size < 2) {
                 badge = "…"
                 big = "Oxuyuram"
