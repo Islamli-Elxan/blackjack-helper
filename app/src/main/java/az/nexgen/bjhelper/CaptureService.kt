@@ -35,6 +35,7 @@ import java.util.Locale
 class CaptureService : Service() {
 
     companion object {
+        @Volatile var running = false
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"
         private const val CHANNEL = "capture"
@@ -174,6 +175,7 @@ class CaptureService : Service() {
             onResetShoe = { hd.post { tracker.resetShoe(); publish() } },
             onNewHand = { hd.post { tracker.clearRound(); publish() } },
             onDebug = { hd.post { dumpDebug() } },
+            onBalance = { openBalance() },
             onStop = { stopSelf() },
             onLayoutChanged = { onOverlayLayout() }
         )
@@ -181,6 +183,7 @@ class CaptureService : Service() {
         ui.postDelayed({ onOverlayLayout() }, 400)
 
         started = true
+        running = true
         hd.post {
             cardReader = CardReader()
             tick()
@@ -281,14 +284,6 @@ class CaptureService : Service() {
     private fun joinCards(l: List<Int>): String =
         if (l.isEmpty()) "-" else l.joinToString(" ") { label(it) }
 
-    private fun betUnits(tc: Double): Int = when {
-        tc < 2.0 -> 1
-        tc < 3.0 -> 2
-        tc < 4.0 -> 4
-        tc < 5.0 -> 6
-        else -> 8
-    }
-
     private fun publish() {
         val d = tracker.dealer
         val p = tracker.player
@@ -297,33 +292,38 @@ class CaptureService : Service() {
         val left = maxOf(decks - seen / 52.0, 0.25)
         val tc = rc / maxOf(left, 0.5)
 
+        var badge = "·"
         var big = "Kart görünmür"
         var sub = "Oyun masasını aç"
         var color = NEUTRAL
 
         if (d.isNotEmpty() || p.isNotEmpty()) {
             if (d.isEmpty() || p.size < 2) {
-                big = "Oxuyuram..."
+                badge = "…"
+                big = "Oxuyuram"
                 sub = ""
             } else {
                 val a = Strategy.advise(p, d[0], false, countMode, tc)
                 if (a.act == "BUST") {
+                    badge = "✕"
                     big = "Keçdin"
                     sub = "BUST " + a.total
                     color = C_BUST
                 } else if (a.act == "BJ") {
+                    badge = "★"
                     big = "Blackjack!"
                     sub = "21"
                     color = C_STAND
                 } else if (d.size >= 2) {
+                    badge = "…"
                     big = "Diler oynayır"
                     sub = ""
                 } else {
                     when (a.act) {
-                        "H" -> { big = "Kart al"; color = C_HIT; sub = "HIT" }
-                        "S" -> { big = "Dayan"; color = C_STAND; sub = "STAND" }
-                        "P" -> { big = "Böl"; color = C_SPLIT; sub = "SPLIT" }
-                        else -> { big = "İkiqat"; color = C_DOUBLE; sub = "DOUBLE" }
+                        "H" -> { badge = "H"; big = "Kart al"; color = C_HIT; sub = "HIT" }
+                        "S" -> { badge = "S"; big = "Dayan"; color = C_STAND; sub = "STAND" }
+                        "P" -> { badge = "P"; big = "Böl"; color = C_SPLIT; sub = "SPLIT" }
+                        else -> { badge = "D"; big = "İkiqat"; color = C_DOUBLE; sub = "DOUBLE" }
                     }
                     val kind = when {
                         a.twentyOne -> "21"
@@ -338,25 +338,54 @@ class CaptureService : Service() {
             }
         }
 
-        var hands = ""
-        if (d.isNotEmpty() || p.isNotEmpty()) {
+        var total = ""
+        if (p.isNotEmpty()) {
             val e = Strategy.evalHand(p)
-            hands = "Diler: " + joinCards(d) + "\nMən: " + joinCards(p)
-            if (p.isNotEmpty()) hands += " = " + e.total + (if (e.soft) " soft" else "")
+            total = e.total.toString() + (if (e.soft) " soft" else "")
         }
 
-        var count = ""
+        var rcText = ""
+        var tcText = ""
+        var tcColor = 0xFFE6F0E9.toInt()
+        var note = ""
         if (countMode) {
-            count = "RC " + (if (rc > 0) "+" + rc else rc.toString()) +
-                " · TC " + String.format(Locale.US, "%+.1f", tc) +
-                " · bahis " + betUnits(tc) + "×"
+            rcText = if (rc > 0) "+" + rc else rc.toString()
+            tcText = String.format(Locale.US, "%+.1f", tc)
+            tcColor = when {
+                tc >= 2.0 -> 0xFF7FE3A2.toInt()
+                tc <= -1.0 -> 0xFFFF9F96.toInt()
+                else -> 0xFFE6F0E9.toInt()
+            }
             if (d.isNotEmpty() && d[0] == 11 && p.size >= 2) {
-                count += "\nSığorta: " + (if (tc >= 3.0) "götür" else "götürmə")
+                note = "Sığorta: " + (if (tc >= 3.0) "götür" else "götürmə")
             }
         }
 
-        val st = Overlay.UiState(big, sub, color, hands, count, diag)
+        val prefs = getSharedPreferences("bj", Context.MODE_PRIVATE)
+        val balance = prefs.getLong("balance", 0L)
+        var bet = ""
+        if (balance > 0L) {
+            val plan = Betting.recommend(
+                balance, tc, countMode, prefs.getInt("risk", 1),
+                prefs.getLong("minBet", 0L), prefs.getLong("maxBet", 0L)
+            )
+            bet = Betting.format(plan.amount)
+        }
+
+        val st = Overlay.UiState(
+            badge, big, sub, color, d, p, total, rcText, tcText, tcColor, bet, note, diag
+        )
         ui.post { overlay?.render(st) }
+    }
+
+    private fun openBalance() {
+        val i = Intent(this, BalanceActivity::class.java)
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(i)
+        } catch (t: Throwable) {
+            Log.w(TAG, "balance dialog", t)
+        }
     }
 
     private fun toast(msg: String) {
@@ -392,6 +421,7 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         started = false
+        running = false
         handler?.removeCallbacksAndMessages(null)
         thread?.quitSafely()
         try { virtualDisplay?.release() } catch (t: Throwable) { Log.w(TAG, "release display", t) }

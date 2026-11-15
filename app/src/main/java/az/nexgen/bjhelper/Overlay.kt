@@ -17,36 +17,49 @@ import kotlin.math.abs
 
 /**
  * Wide, low window along the top of the screen, above the dealer's cards, so it never covers a card.
- * Tap the title row to open or close the details; drag to move it somewhere else.
+ * Closed: a round action badge, the advice, and the recommended bet.
+ * Tap to open: both hands as small cards, the count and the buttons. Drag to move it.
  */
 class Overlay(
     private val ctx: Context,
     private val onResetShoe: () -> Unit,
     private val onNewHand: () -> Unit,
     private val onDebug: () -> Unit,
+    private val onBalance: () -> Unit,
     private val onStop: () -> Unit,
     private val onLayoutChanged: () -> Unit = {}
 ) {
 
     class UiState(
+        val badge: String,
         val big: String,
         val sub: String,
         val color: Int,
-        val hands: String,
-        val count: String,
-        val diag: String = ""
+        val dealer: List<Int>,
+        val player: List<Int>,
+        val total: String,
+        val rc: String,
+        val tc: String,
+        val tcColor: Int,
+        val bet: String,
+        val note: String,
+        val diag: String
     )
 
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val root = LinearLayout(ctx)
+    private val rootBg = GradientDrawable()
     private val head = LinearLayout(ctx)
-    private val details = LinearLayout(ctx)
+    private val badgeTv = TextView(ctx)
     private val bigTv = TextView(ctx)
     private val subTv = TextView(ctx)
-    private val handsTv = TextView(ctx)
-    private val countTv = TextView(ctx)
-    private val diagTv = TextView(ctx)
+    private val betTv = TextView(ctx)
+    private val details = LinearLayout(ctx)
+    private val handsRow = LinearLayout(ctx)
+    private val statsRow = LinearLayout(ctx)
+    private val pills = LinearLayout(ctx)
     private val buttons = LinearLayout(ctx)
+    private val diagTv = TextView(ctx)
     private var compact = true
     private var added = false
 
@@ -70,57 +83,78 @@ class Overlay(
         params.y = inset()
 
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(12), dp(6), dp(12), dp(6))
-        val bg = GradientDrawable()
-        bg.setColor(0xEB0F1A14.toInt())
-        bg.cornerRadius = dp(14).toFloat()
-        root.background = bg
+        root.setPadding(dp(10), dp(6), dp(10), dp(6))
+        rootBg.setColor(0xF2101814.toInt())
+        rootBg.cornerRadius = dp(18).toFloat()
+        rootBg.setStroke(dp(2), 0x66FFFFFF)
+        root.background = rootBg
 
-        bigTv.textSize = 22f
+        // head: badge, advice, bet
+        badgeTv.textSize = 15f
+        badgeTv.setTypeface(Typeface.DEFAULT_BOLD)
+        badgeTv.gravity = Gravity.CENTER
+        badgeTv.setTextColor(0xFF10201A.toInt())
+        badgeTv.layoutParams = LinearLayout.LayoutParams(dp(30), dp(30))
+
+        bigTv.textSize = 21f
         bigTv.setTypeface(Typeface.DEFAULT_BOLD)
         bigTv.setTextColor(Color.WHITE)
-        bigTv.text = "Hazırdır"
         bigTv.isSingleLine = true
+        bigTv.setPadding(dp(10), 0, 0, 0)
 
-        subTv.textSize = 12f
-        subTv.setTextColor(0xFFB9C9BF.toInt())
+        subTv.textSize = 11.5f
+        subTv.setTextColor(0xFFA9BBB0.toInt())
         subTv.isSingleLine = true
         subTv.ellipsize = TextUtils.TruncateAt.END
-        subTv.gravity = Gravity.CENTER_VERTICAL
-        subTv.setPadding(dp(10), 0, 0, 0)
+        subTv.setPadding(dp(8), 0, dp(6), 0)
+
+        betTv.textSize = 15f
+        betTv.setTypeface(Typeface.DEFAULT_BOLD)
+        betTv.setTextColor(0xFF2A1D00.toInt())
+        betTv.isSingleLine = true
+        betTv.gravity = Gravity.CENTER
+        betTv.setPadding(dp(10), dp(4), dp(10), dp(4))
+        betTv.background = pillBg(0xFFF0C14B.toInt())
 
         head.orientation = LinearLayout.HORIZONTAL
         head.gravity = Gravity.CENTER_VERTICAL
+        head.addView(badgeTv)
         head.addView(bigTv)
         head.addView(subTv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(betTv)
 
-        handsTv.textSize = 13f
-        handsTv.setTextColor(Color.WHITE)
-        handsTv.isSingleLine = true
-        handsTv.ellipsize = TextUtils.TruncateAt.END
+        // details
+        handsRow.orientation = LinearLayout.HORIZONTAL
+        handsRow.gravity = Gravity.CENTER_VERTICAL
+        handsRow.setPadding(0, dp(6), 0, 0)
 
-        countTv.textSize = 12f
-        countTv.setTextColor(0xFFB9C9BF.toInt())
-        countTv.isSingleLine = true
-        countTv.ellipsize = TextUtils.TruncateAt.END
-
-        diagTv.textSize = 10f
-        diagTv.setTextColor(0xFF7F9488.toInt())
-        diagTv.isSingleLine = true
-        diagTv.ellipsize = TextUtils.TruncateAt.END
+        pills.orientation = LinearLayout.HORIZONTAL
+        pills.gravity = Gravity.CENTER_VERTICAL
 
         buttons.orientation = LinearLayout.HORIZONTAL
-        buttons.setPadding(0, dp(4), 0, 0)
+        buttons.gravity = Gravity.CENTER_VERTICAL
+        buttons.addView(button("Balans") { onBalance() })
         buttons.addView(button("Say ↺") { onResetShoe() })
-        buttons.addView(button("Yeni əl") { onNewHand() })
+        buttons.addView(button("Yeni") { onNewHand() })
         buttons.addView(button("Debug") { onDebug() })
         buttons.addView(button("✕") { onStop() })
 
+        statsRow.orientation = LinearLayout.HORIZONTAL
+        statsRow.gravity = Gravity.CENTER_VERTICAL
+        statsRow.setPadding(0, dp(6), 0, 0)
+        statsRow.addView(pills, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        statsRow.addView(buttons)
+
+        diagTv.textSize = 9.5f
+        diagTv.setTextColor(0xFF6F8378.toInt())
+        diagTv.isSingleLine = true
+        diagTv.ellipsize = TextUtils.TruncateAt.END
+        diagTv.setPadding(0, dp(3), 0, 0)
+
         details.orientation = LinearLayout.VERTICAL
-        details.addView(handsTv)
-        details.addView(countTv)
+        details.addView(handsRow)
+        details.addView(statsRow)
         details.addView(diagTv)
-        details.addView(buttons)
         details.visibility = View.GONE
 
         root.addView(head)
@@ -158,8 +192,7 @@ class Overlay(
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!moved) toggleCompact()
-                        else root.post { onLayoutChanged() }
+                        if (!moved) toggleCompact() else root.post { onLayoutChanged() }
                         return true
                     }
                 }
@@ -168,28 +201,83 @@ class Overlay(
         })
     }
 
+    private fun pillBg(color: Int): GradientDrawable {
+        val g = GradientDrawable()
+        g.setColor(color)
+        g.cornerRadius = dp(14).toFloat()
+        return g
+    }
+
     private fun button(label: String, click: () -> Unit): TextView {
         val tv = TextView(ctx)
         tv.text = label
-        tv.setTextColor(Color.WHITE)
-        tv.textSize = 11f
+        tv.setTextColor(0xFFE6F0E9.toInt())
+        tv.textSize = 10.5f
         tv.isSingleLine = true
         tv.gravity = Gravity.CENTER
-        tv.setPadding(dp(4), dp(5), dp(4), dp(5))
+        tv.setPadding(dp(7), dp(5), dp(7), dp(5))
         val bg = GradientDrawable()
-        bg.setColor(0x33FFFFFF)
-        bg.cornerRadius = dp(8).toFloat()
+        bg.setColor(0x26FFFFFF)
+        bg.cornerRadius = dp(9).toFloat()
         tv.background = bg
         tv.setOnClickListener { click() }
-        val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        lp.setMargins(dp(2), 0, dp(2), 0)
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(dp(2), 0, 0, 0)
         tv.layoutParams = lp
         return tv
     }
 
+    /** A small playing card showing a rank. */
+    private fun cardChip(text: String): TextView {
+        val tv = TextView(ctx)
+        tv.text = text
+        tv.textSize = 12.5f
+        tv.setTypeface(Typeface.DEFAULT_BOLD)
+        tv.setTextColor(0xFF16231C.toInt())
+        tv.gravity = Gravity.CENTER
+        tv.minWidth = dp(22)
+        tv.setPadding(dp(3), dp(2), dp(3), dp(2))
+        val bg = GradientDrawable()
+        bg.setColor(0xFFFBF8EE.toInt())
+        bg.cornerRadius = dp(5).toFloat()
+        tv.background = bg
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(0, 0, dp(3), 0)
+        tv.layoutParams = lp
+        return tv
+    }
+
+    private fun tag(text: String, color: Int = 0xFF9DB1A5.toInt(), size: Float = 11f): TextView {
+        val tv = TextView(ctx)
+        tv.text = text
+        tv.textSize = size
+        tv.setTextColor(color)
+        tv.setTypeface(Typeface.DEFAULT_BOLD)
+        tv.setPadding(0, 0, dp(5), 0)
+        return tv
+    }
+
+    private fun pill(text: String, fg: Int): TextView {
+        val tv = TextView(ctx)
+        tv.text = text
+        tv.textSize = 11f
+        tv.setTypeface(Typeface.DEFAULT_BOLD)
+        tv.setTextColor(fg)
+        tv.isSingleLine = true
+        tv.setPadding(dp(8), dp(3), dp(8), dp(3))
+        tv.background = pillBg(0x22FFFFFF)
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(0, 0, dp(4), 0)
+        tv.layoutParams = lp
+        return tv
+    }
+
+    private fun rankLabel(r: Int): String = if (r == 11) "A" else r.toString()
+
     private fun toggleCompact() {
         compact = !compact
         details.visibility = if (compact) View.GONE else View.VISIBLE
+        subTv.visibility = if (compact) View.VISIBLE else View.GONE
         root.post { onLayoutChanged() }
     }
 
@@ -203,7 +291,7 @@ class Overlay(
     /** Where the window is right now, in screen pixels. */
     fun bounds(): CardFinder.Box {
         val w = if (root.width > 0) root.width else params.width
-        val h = if (root.height > 0) root.height else dp(60)
+        val h = if (root.height > 0) root.height else dp(56)
         return CardFinder.Box(params.x, params.y, params.x + w, params.y + h)
     }
 
@@ -244,13 +332,38 @@ class Overlay(
     }
 
     fun render(s: UiState) {
+        val accent = s.color
+        rootBg.setStroke(dp(2), (accent and 0x00FFFFFF) or 0x99000000.toInt())
+
+        val badgeBg = GradientDrawable()
+        badgeBg.shape = GradientDrawable.OVAL
+        badgeBg.setColor(accent)
+        badgeTv.background = badgeBg
+        badgeTv.text = s.badge
+
         bigTv.text = s.big
-        bigTv.setTextColor(s.color)
+        bigTv.setTextColor(accent)
         subTv.text = s.sub
-        handsTv.text = s.hands.replace("\n", "   ")
-        handsTv.visibility = if (s.hands.isEmpty()) View.GONE else View.VISIBLE
-        countTv.text = s.count.replace("\n", "   ")
-        countTv.visibility = if (s.count.isEmpty()) View.GONE else View.VISIBLE
+        subTv.visibility = if (compact && s.sub.isNotEmpty()) View.VISIBLE else View.GONE
+        betTv.text = if (s.bet.isEmpty()) "" else "◉ " + s.bet
+        betTv.visibility = if (s.bet.isEmpty()) View.GONE else View.VISIBLE
+
+        handsRow.removeAllViews()
+        if (s.dealer.isNotEmpty() || s.player.isNotEmpty()) {
+            handsRow.addView(tag("DİLER"))
+            for (c in s.dealer) handsRow.addView(cardChip(rankLabel(c)))
+            handsRow.addView(tag("MƏN").also { it.setPadding(dp(10), 0, dp(5), 0) })
+            for (c in s.player) handsRow.addView(cardChip(rankLabel(c)))
+            if (s.total.isNotEmpty()) handsRow.addView(tag("= " + s.total, 0xFFE6F0E9.toInt(), 13f))
+        } else {
+            handsRow.addView(tag("Masa boşdur, kart gözləyirəm"))
+        }
+
+        pills.removeAllViews()
+        if (s.rc.isNotEmpty()) pills.addView(pill("RC " + s.rc, 0xFFE6F0E9.toInt()))
+        if (s.tc.isNotEmpty()) pills.addView(pill("TC " + s.tc, s.tcColor))
+        if (s.note.isNotEmpty()) pills.addView(pill(s.note, 0xFFF0C14B.toInt()))
+
         diagTv.text = s.diag
         diagTv.visibility = if (s.diag.isEmpty()) View.GONE else View.VISIBLE
     }
