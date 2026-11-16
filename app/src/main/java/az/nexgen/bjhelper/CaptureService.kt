@@ -141,6 +141,7 @@ class CaptureService : Service() {
 
         val prefs = getSharedPreferences("bj", Context.MODE_PRIVATE)
         decks = prefs.getInt("decks", 6)
+        shoeLimitCache = 0
         countMode = prefs.getBoolean("count", true)
         val prior = RoundStore.load(this)
         log.start(prior.second, prior.first)
@@ -196,6 +197,7 @@ class CaptureService : Service() {
                     var msg = "Dəstə sıfırlandı, say 0-dan başlayır"
                     if (cards >= 10) {
                         RoundStore.appendShuffle(this, cards, tracker.rc(), decks)
+                        refreshShoeLimit()
                         msg = "Dəstə sıfırlandı. Oxunan kart: " + cards + " (≈" + String.format(Locale.US, "%.1f", cards / 52.0) + " dəstə)"
                     }
                     tracker.resetShoe()
@@ -369,6 +371,7 @@ class CaptureService : Service() {
     private fun publish() {
         if (resetStats) {
             resetStats = false
+            shoeLimitCache = 0
             log.start(1, RoundLog.Stats())
         }
         val now = SystemClock.elapsedRealtime()
@@ -379,8 +382,10 @@ class CaptureService : Service() {
         val seen = tracker.seen()
         val left = maxOf(decks - seen / 52.0, 0.25)
         val tc = (rc / maxOf(left, 1.0)).coerceIn(-12.0, 12.0)
-        // far into the shoe the game has surely shuffled; a count nobody reset is not to be trusted
-        val stale = seen > decks * 52 * 0.85
+        // The game shuffles after about half a shoe. A count nobody reset past that point is not to be
+        // trusted; once shuffles have been marked, the limit follows what was really seen.
+        val staleAt = shoeLimit()
+        val stale = seen > staleAt
         val useCount = countMode && !stale
 
         var badge = "·"
@@ -475,6 +480,8 @@ class CaptureService : Service() {
                 note = "Say köhnədir: qarışdırmadan sonra ↺ bas"
             } else if (d.isNotEmpty() && d[0] == 11 && ready && !decided) {
                 note = "Sığorta: " + (if (tc >= 3.0) "götür" else "götürmə")
+            } else if (seen > staleAt * 0.8) {
+                note = "Qarışdırma yaxındır"
             }
         }
 
@@ -499,6 +506,19 @@ class CaptureService : Service() {
             st.short(), statsLong, note, diag, tracker.dealerApprox, tracker.playerApprox
         )
         ui.post { overlay?.render(ui0) }
+    }
+
+    private var shoeLimitCache = 0
+
+    /** Cards after which the count counts as out of date: learned from marked shuffles, else about 60% of the shoe. */
+    private fun shoeLimit(): Int {
+        if (shoeLimitCache == 0) refreshShoeLimit()
+        return shoeLimitCache
+    }
+
+    private fun refreshShoeLimit() {
+        val shoes = RoundStore.shoes(this)
+        shoeLimitCache = if (shoes.isEmpty()) (decks * 52 * 0.6).toInt() else (shoes.max() * 1.2).toInt()
     }
 
     private fun toast(msg: String) {
