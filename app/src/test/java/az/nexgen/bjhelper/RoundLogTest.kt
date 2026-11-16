@@ -86,4 +86,17 @@ class RoundLogTest {
         val done = upd(log, 2000, emptyList(), emptyList())
         assertEquals(5, done!!.id)
     }
+
+    @Test
+    fun naturalPaidBeforeTheDealerTurnsACard() {
+        val log = RoundLog(settleMs = 500L)
+        upd(log, 0, listOf(10), listOf(listOf(11, 10)), listOf("BJ:21"))
+        upd(log, 2000, listOf(10), listOf(listOf(11, 10)), listOf("BJ:21"))
+        val done = upd(log, 6000, emptyList(), emptyList())
+        assertNotNull(done)
+        assertEquals(listOf(Outcome.Kind.BLACKJACK), done!!.results)
+        assertEquals(1, log.stats.win)
+        assertEquals(1, log.stats.blackjack)
+        assertEquals(1, log.stats.rounds)
+    }
 }

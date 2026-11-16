@@ -147,6 +147,14 @@ class RoundLog(
         r.finalDealer = lastDealer
         r.finalHands = lastHands
         r.durationMs = now - t0
+        // a natural 21 against a dealer who did not turn a second card is paid at once: a win
+        if (!counted && lastHands.size == 1 && lastDealer.size == 1 && lastHands[0].size == 2 &&
+            Strategy.evalHand(lastHands[0]).total == 21 && r.results == null
+        ) {
+            r.results = listOf(Outcome.Kind.BLACKJACK)
+            addToStats(Outcome.Kind.BLACKJACK)
+            stats.rounds++
+        }
         return r
     }
 
