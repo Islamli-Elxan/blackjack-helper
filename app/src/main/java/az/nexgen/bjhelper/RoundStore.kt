@@ -32,6 +32,38 @@ object RoundStore {
         }
     }
 
+    /** Rounds saved since the last shuffle mark. */
+    @Synchronized
+    fun roundsSinceShuffle(ctx: Context): Int {
+        var n = 0
+        for (l in lines(ctx).asReversed()) {
+            if (l.contains("\"shuffle\":true")) break
+            n++
+        }
+        return n
+    }
+
+    /** Remembers how many cards were seen between two shuffles (the player marks each shuffle). */
+    fun appendShuffle(ctx: Context, cards: Int, rc: Int, decks: Int) {
+        val line = "{\"shuffle\":true,\"time\":\"" + fmt(System.currentTimeMillis()) + "\",\"cards\":" + cards +
+            ",\"rc\":" + rc + ",\"rounds\":" + roundsSinceShuffle(ctx) + ",\"decks\":" + decks + "}"
+        append(ctx, line)
+    }
+
+    /** Cards seen in each finished shoe, oldest first. */
+    fun shoes(ctx: Context): List<Int> {
+        val out = ArrayList<Int>()
+        for (l in lines(ctx)) {
+            if (!l.contains("\"shuffle\":true")) continue
+            try {
+                out.add(JSONObject(l).getInt("cards"))
+            } catch (t: Throwable) {
+                Log.w(TAG, "bad shuffle line", t)
+            }
+        }
+        return out
+    }
+
     @Synchronized
     fun clear(ctx: Context) {
         try {
@@ -80,6 +112,7 @@ object RoundStore {
         val out = ArrayList<Recent>()
         for (l in lines(ctx).asReversed()) {
             if (out.size >= n) break
+            if (l.contains("\"shuffle\":true")) continue
             try {
                 val o = JSONObject(l)
                 val fin = o.getJSONObject("final")
@@ -123,9 +156,14 @@ object RoundStore {
             .append(", qazanc: ").append(st.win).append(", uduzma: ").append(st.lose)
             .append(", beraber: ").append(st.push).append(", blackjack: ").append(st.blackjack)
             .append(", qazanma faizi: ").append(String.format(Locale.US, "%.1f", st.winRate())).append("%\n")
+        val shoes = shoes(ctx)
+        if (shoes.isNotEmpty()) {
+            sb.append("qarisdirmalar (her biri arasinda oxunan kart sayi): ").append(shoes.joinToString(", "))
+            sb.append("; orta: ").append(String.format(Locale.US, "%.0f", shoes.average())).append(" kart\n")
+        }
         sb.append("\nQEYD: kartlar 2-9, 10 (10/J/Q/K), 11 (As). events: t=ms, d=diler, h=oyuncunun elleri,\n")
         sb.append("adv=tovsiye (H kart al, S dayan, D ikiqat, P bol), pos=kartlarin ekrandaki x yeri.\n")
-        sb.append("missed=oxunmayan isaretin maskasi.\n\n")
+        sb.append("missed=oxunmayan isaretin maskasi. shuffle=oyuncunun qeyd etdiyi qarisdirma.\n\n")
         for (l in lines(ctx)) sb.append(l).append('\n')
         return sb.toString()
     }

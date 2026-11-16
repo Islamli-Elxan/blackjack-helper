@@ -190,7 +190,19 @@ class CaptureService : Service() {
 
         overlay = Overlay(
             this,
-            onResetShoe = { hd.post { tracker.resetShoe(); publish(); toast("Dəstə sıfırlandı, say 0-dan başlayır") } },
+            onResetShoe = {
+                hd.post {
+                    val cards = tracker.seen()
+                    var msg = "Dəstə sıfırlandı, say 0-dan başlayır"
+                    if (cards >= 10) {
+                        RoundStore.appendShuffle(this, cards, tracker.rc(), decks)
+                        msg = "Dəstə sıfırlandı. Oxunan kart: " + cards + " (≈" + String.format(Locale.US, "%.1f", cards / 52.0) + " dəstə)"
+                    }
+                    tracker.resetShoe()
+                    publish()
+                    toast(msg)
+                }
+            },
             onNewHand = { hd.post { tracker.clearRound(); publish() } },
             onDebug = { hd.post { dumpDebug() } },
             onStop = { stopSelf() },
