@@ -124,7 +124,8 @@ class FusionTest {
         t.tick(1400L)
         assertTrue(t.playerApprox)
         assertEquals(0, t.rc())
-        assertEquals(0, t.seen())
+        // they were dealt, so they count as seen cards (1 dealer card, 2 player cards)
+        assertEquals(3, t.seen())
     }
 
     @Test
