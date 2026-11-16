@@ -57,6 +57,7 @@ class Overlay(
     private val badgeTv = TextView(ctx)
     private val bigTv = TextView(ctx)
     private val subTv = TextView(ctx)
+    private val shuffleTv = TextView(ctx)
     private val betTv = TextView(ctx)
     private val details = LinearLayout(ctx)
     private val handsRow = LinearLayout(ctx)
@@ -125,6 +126,18 @@ class Overlay(
         head.addView(badgeTv)
         head.addView(bigTv)
         head.addView(subTv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        // one tap after the game shuffles the cards: the count starts again from zero
+        shuffleTv.text = "↺"
+        shuffleTv.textSize = 17f
+        shuffleTv.setTypeface(Typeface.DEFAULT_BOLD)
+        shuffleTv.setTextColor(0xFFF0C14B.toInt())
+        shuffleTv.gravity = Gravity.CENTER
+        shuffleTv.setPadding(dp(10), dp(2), dp(10), dp(2))
+        shuffleTv.background = pillBg(0x33F0C14B)
+        shuffleTv.setOnClickListener { onResetShoe() }
+        val slp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        slp.setMargins(dp(4), 0, dp(6), 0)
+        head.addView(shuffleTv, slp)
         head.addView(betTv)
 
         // details

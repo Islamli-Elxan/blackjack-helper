@@ -190,7 +190,7 @@ class CaptureService : Service() {
 
         overlay = Overlay(
             this,
-            onResetShoe = { hd.post { tracker.resetShoe(); publish() } },
+            onResetShoe = { hd.post { tracker.resetShoe(); publish(); toast("Dəstə sıfırlandı, say 0-dan başlayır") } },
             onNewHand = { hd.post { tracker.clearRound(); publish() } },
             onDebug = { hd.post { dumpDebug() } },
             onStop = { stopSelf() },
@@ -366,7 +366,10 @@ class CaptureService : Service() {
         val rc = tracker.rc()
         val seen = tracker.seen()
         val left = maxOf(decks - seen / 52.0, 0.25)
-        val tc = rc / maxOf(left, 0.5)
+        val tc = (rc / maxOf(left, 1.0)).coerceIn(-12.0, 12.0)
+        // far into the shoe the game has surely shuffled; a count nobody reset is not to be trusted
+        val stale = seen > decks * 52 * 0.85
+        val useCount = countMode && !stale
 
         var badge = "·"
         var big = "Kart görünmür"
@@ -412,7 +415,7 @@ class CaptureService : Service() {
                 sub = ""
                 for (h in hands) adviceCodes.add("-")
             } else {
-                val advs = hands.map { Strategy.advise(it, d[0], false, countMode, tc) }
+                val advs = hands.map { Strategy.advise(it, d[0], false, useCount, tc) }
                 val first = advs[0]
                 badge = letter(first.act)
                 color = tint(first.act)
@@ -449,13 +452,16 @@ class CaptureService : Service() {
         var note = ""
         if (countMode) {
             rcText = if (rc > 0) "+" + rc else rc.toString()
-            tcText = String.format(Locale.US, "%+.1f", tc)
+            tcText = if (stale) "?" else String.format(Locale.US, "%+.1f", tc)
             tcColor = when {
+                stale -> 0xFFF0C14B.toInt()
                 tc >= 2.0 -> 0xFF7FE3A2.toInt()
                 tc <= -1.0 -> 0xFFFF9F96.toInt()
                 else -> 0xFFE6F0E9.toInt()
             }
-            if (d.isNotEmpty() && d[0] == 11 && ready && !decided) {
+            if (stale) {
+                note = "Say köhnədir: qarışdırmadan sonra ↺ bas"
+            } else if (d.isNotEmpty() && d[0] == 11 && ready && !decided) {
                 note = "Sığorta: " + (if (tc >= 3.0) "götür" else "götürmə")
             }
         }
