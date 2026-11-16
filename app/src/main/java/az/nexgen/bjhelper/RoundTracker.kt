@@ -74,7 +74,11 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
             // unchecked one may only add cards: they never disappear during a round, so a smaller
             // reading is a hidden card.
             val dFree = pendFlags.dealerVerified || pendFlags.dealerApprox
-            if (pendD.isNotEmpty() && (pendD != dealer || pendFlags.dealerApprox != dealerApprox) &&
+            // cards sliding away leave a partial reading that only the printed total still matches;
+            // it must not replace the real cards already known with the same total
+            val dKeep = pendFlags.dealerApprox && !dealerApprox && dealer.isNotEmpty() &&
+                sameTotals(listOf(dealer), listOf(pendD))
+            if (pendD.isNotEmpty() && !dKeep && (pendD != dealer || pendFlags.dealerApprox != dealerApprox) &&
                 (dFree || pendD.size >= dealer.size)
             ) {
                 dealer = pendD
@@ -82,7 +86,8 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
                 changed = true
             }
             val pFree = pendFlags.playerVerified || pendFlags.playerApprox
-            if (pendH.isNotEmpty() && (pendH != hands || pendFlags.playerApprox != playerApprox) &&
+            val pKeep = pendFlags.playerApprox && !playerApprox && hands.isNotEmpty() && sameTotals(hands, pendH)
+            if (pendH.isNotEmpty() && !pKeep && (pendH != hands || pendFlags.playerApprox != playerApprox) &&
                 (pFree || pendH.sumOf { it.size } >= player.size)
             ) {
                 hands = pendH
@@ -97,15 +102,19 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
         return changed
     }
 
+    private fun sameTotals(a: List<List<Int>>, b: List<List<Int>>): Boolean {
+        if (a.size != b.size) return false
+        for (i in a.indices) {
+            if (Strategy.evalHand(a[i]).total != Strategy.evalHand(b[i]).total) return false
+        }
+        return true
+    }
+
     private fun commitRound() {
-        if (!dealerApprox) {
-            for (c in dealer) baseRc += Strategy.hilo(c)
-            baseCards += dealer.size
-        }
-        if (!playerApprox) {
-            for (c in player) baseRc += Strategy.hilo(c)
-            baseCards += player.size
-        }
+        // an approximate hand has no known ranks: it adds no count, but its cards were dealt
+        if (!dealerApprox) for (c in dealer) baseRc += Strategy.hilo(c)
+        if (!playerApprox) for (c in player) baseRc += Strategy.hilo(c)
+        baseCards += dealer.size + player.size
         dealer = emptyList()
         hands = emptyList()
         dealerApprox = false
@@ -143,5 +152,5 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
         return v
     }
 
-    fun seen(): Int = baseCards + (if (dealerApprox) 0 else dealer.size) + (if (playerApprox) 0 else player.size)
+    fun seen(): Int = baseCards + dealer.size + player.size
 }

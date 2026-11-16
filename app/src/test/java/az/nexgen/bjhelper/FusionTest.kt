@@ -126,4 +126,37 @@ class FusionTest {
         assertEquals(0, t.rc())
         assertEquals(0, t.seen())
     }
+
+    @Test
+    fun partialReadingDoesNotReplaceKnownCards() {
+        val t = RoundTracker(stableMs = 300L, clearMs = 900L)
+        // the real hands were read and checked
+        t.onHands(listOf(10, 6), listOf(listOf(10, 7)), 0L, RoundTracker.Flags(true, true))
+        t.tick(400L)
+        assertEquals(listOf(listOf(10, 7)), t.hands)
+        // cards slide away: only the printed totals still match, as stand-in hands with the same totals
+        t.onHands(listOf(10, 6), listOf(listOf(10, 7)), 500L, RoundTracker.Flags(false, false, true, true))
+        t.onHands(listOf(6, 10), listOf(listOf(7, 10)), 600L, RoundTracker.Flags(false, false, true, true))
+        t.tick(1000L)
+        assertFalse(t.playerApprox)
+        assertFalse(t.dealerApprox)
+        // a total that really changed is taken from the stand-in
+        t.onHands(listOf(10, 6), listOf(listOf(10, 9)), 1100L, RoundTracker.Flags(false, false, false, true))
+        t.tick(1500L)
+        assertTrue(t.playerApprox)
+        assertEquals(listOf(listOf(10, 9)), t.hands)
+    }
+
+    @Test
+    fun approximateCardsAreSeenButNotCounted() {
+        val t = RoundTracker(stableMs = 300L, clearMs = 900L)
+        t.onHands(listOf(10, 6), listOf(listOf(10, 5)), 0L, RoundTracker.Flags(false, false, true, false))
+        t.tick(400L)
+        t.onHands(emptyList(), emptyList(), 500L)
+        t.onHands(emptyList(), emptyList(), 700L)
+        t.tick(1500L)
+        assertEquals(4, t.seen())
+        // only the player's real cards count: 10 is -1, 5 is +1
+        assertEquals(0, t.rc())
+    }
 }

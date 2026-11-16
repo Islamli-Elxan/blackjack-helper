@@ -486,8 +486,11 @@ class CaptureService : Service() {
         }
 
         // the record of the round, and the counters
+        // the report shows what the tracker accepted (~D / ~M = known only by the printed total)
+        val lay = layout.replace(" ~D", "").replace(" ~M", "") +
+            (if (tracker.dealerApprox) " ~D" else "") + (if (tracker.playerApprox) " ~M" else "")
         val finished = log.update(
-            now, System.currentTimeMillis(), d, hands, rc, tc, adviceCodes, layout, decks, countMode
+            now, System.currentTimeMillis(), d, hands, rc, tc, adviceCodes, lay, decks, countMode
         )
         if (finished != null) {
             RoundStore.append(this, log.toJson(finished, version, decks, countMode))
