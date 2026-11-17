@@ -55,6 +55,15 @@ class ButtonFinderTest {
     }
 
     @Test
+    fun fourButtonsWithSplitOnTheVegasTable() {
+        val b = find("vegas")
+        assertEquals(listOf(ButtonFinder.Kind.STAND, ButtonFinder.Kind.DOUBLE, ButtonFinder.Kind.HIT), b.map { it.kind })
+        near(b[0], 150)
+        near(b[1], 670)
+        near(b[2], 930)
+    }
+
+    @Test
     fun emptyScreenHasNoButtons() {
         val px = IntArray(w * rows)
         for (i in px.indices) px[i] = 0xFF1A5A2A.toInt()

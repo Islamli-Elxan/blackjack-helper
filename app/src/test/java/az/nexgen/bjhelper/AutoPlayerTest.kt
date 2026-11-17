@@ -70,6 +70,14 @@ class AutoPlayerTest {
     }
 
     @Test
+    fun doublesEvenWhenTheStandButtonIsNotSeen() {
+        val noStand = listOf(btn(ButtonFinder.Kind.DOUBLE, 670), btn(ButtonFinder.Kind.HIT, 930))
+        // 5,5 against 7 is a hard ten: double
+        val d = run(AutoPlayer(Random(15)), state(listOf(7), listOf(5, 5), noStand)) as AutoPlayer.Decision.Tap
+        assertEquals(ButtonFinder.Kind.DOUBLE, d.kind)
+    }
+
+    @Test
     fun leavesSplitsToThePerson() {
         val d = run(AutoPlayer(Random(6)), state(listOf(6), listOf(8, 8), three))
         assertTrue(d is AutoPlayer.Decision.Wait)

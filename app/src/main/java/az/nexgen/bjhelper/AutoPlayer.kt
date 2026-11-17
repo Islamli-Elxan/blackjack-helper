@@ -90,9 +90,10 @@ class AutoPlayer(private val rnd: Random = Random()) {
         val stand = s.buttons.firstOrNull { it.kind == ButtonFinder.Kind.STAND }
         val hit = s.buttons.firstOrNull { it.kind == ButtonFinder.Kind.HIT }
         val dbl = s.buttons.firstOrNull { it.kind == ButtonFinder.Kind.DOUBLE }
-        if (stand == null || hit == null) return Decision.Wait("düymə görünmür")
+        // a decision screen has at least two of the buttons; a missing one only matters if it is the one wanted
+        if (s.buttons.size < 2) return Decision.Wait("düymə görünmür")
 
-        val target: ButtonFinder.Button
+        val target: ButtonFinder.Button?
         val label: String
         when (adv.act) {
             "H" -> { target = hit; label = "kart al" }
@@ -101,6 +102,7 @@ class AutoPlayer(private val rnd: Random = Random()) {
             "Ds" -> if (dbl != null) { target = dbl; label = "ikiqat" } else { target = stand; label = "dayan" }
             else -> return Decision.Wait("?")
         }
+        if (target == null) return Decision.Wait("düymə görünmür")
 
         val c = s.cover
         if (c != null) {

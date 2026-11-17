@@ -4,7 +4,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Finds the game's action buttons by colour: Stand is red, Double is blue, Hit is green. The set
+ * Finds the game's action buttons by colour: Stand is red, Double is blue, Hit is green (the table may also have an orange Split). The set
  * of buttons changes (Double is gone after the first card), so what is on screen is looked up
  * every time and the centre of the button is returned as a screen position.
  */
@@ -23,9 +23,26 @@ object ButtonFinder {
 
     private const val BLOCK = 4
 
-    private fun isRed(r: Int, g: Int, b: Int) = r > 130 && g < 85 && b < 85 && r > g + 70
-    private fun isBlue(r: Int, g: Int, b: Int) = b > 140 && r < 70 && g in 55..165 && b > r + 90
-    private fun isGreen(r: Int, g: Int, b: Int) = g > 140 && r in 55..160 && b < 90 && g > r + 40
+    /**
+     * Which button colour a pixel has, by hue: the tables differ in brightness (dark red, olive
+     * green), but never in hue. Felt is a pure green (hue 120) and stays out of the button's range.
+     * @return 0 stand (red), 1 double (blue), 2 hit (green), -1 none
+     */
+    private fun kindOf(r: Int, g: Int, b: Int): Int {
+        val mx = max(r, max(g, b))
+        val d = mx - min(r, min(g, b))
+        if (mx < 80 || d * 10 < 6 * mx) return -1
+        var h = when {
+            mx == r -> 60f * (g - b).toFloat() / d
+            mx == g -> 60f * ((b - r).toFloat() / d + 2f)
+            else -> 60f * ((r - g).toFloat() / d + 4f)
+        }
+        if (h < 0f) h += 360f
+        if ((h >= 348f || h <= 12f) && mx >= 95 && d * 10 >= 7 * mx) return 0
+        if (h in 70f..108f) return 2
+        if (h in 205f..230f && mx >= 100) return 1
+        return -1
+    }
 
     /**
      * @param px rows [yOff, yOff + rows) of the screen, full width
@@ -39,21 +56,22 @@ object ButtonFinder {
         val minW = (0.17f * w).toInt()
         val maxW = (0.30f * w).toInt()
         val minH = (0.02f * fullH).toInt()
+        val cls = ByteArray(w * rows)
+        for (i in cls.indices) {
+            val p = px[i]
+            cls[i] = kindOf((p shr 16) and 0xFF, (p shr 8) and 0xFF, p and 0xFF).toByte()
+        }
         for (kind in Kind.values()) {
+            val want = when (kind) {
+                Kind.STAND -> 0
+                Kind.DOUBLE -> 1
+                Kind.HIT -> 2
+            }
             val on = BooleanArray(bw * bh)
             for (by in 0 until bh) for (bx in 0 until bw) {
                 var n = 0
                 for (dy in 0 until BLOCK) for (dx in 0 until BLOCK) {
-                    val p = px[(by * BLOCK + dy) * w + bx * BLOCK + dx]
-                    val r = (p shr 16) and 0xFF
-                    val g = (p shr 8) and 0xFF
-                    val b = p and 0xFF
-                    val hit = when (kind) {
-                        Kind.STAND -> isRed(r, g, b)
-                        Kind.DOUBLE -> isBlue(r, g, b)
-                        Kind.HIT -> isGreen(r, g, b)
-                    }
-                    if (hit) n++
+                    if (cls[(by * BLOCK + dy) * w + bx * BLOCK + dx].toInt() == want) n++
                 }
                 on[by * bw + bx] = n >= 5
             }
