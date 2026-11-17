@@ -183,8 +183,8 @@ class MainActivity : Activity() {
         autoCol.addView(
             Ui.text(
                 this,
-                "Tövsiyəyə uyğun Kart al, Dayan və İkiqat düymələrinə toxunur. Yalnız tək əl və təsdiqlənmiş kartlarla. " +
-                    "Bölünməni, bahisi və Deal-ı özün basırsan. Pəncərədəki AVTO ilə dayandırılır.",
+                "Tövsiyəyə uyğun Kart al, Dayan, İkiqat və Böl düymələrinə toxunur (bölünmüş əlləri soldan sağa oynayır). " +
+                    "Yalnız cəmi təsdiqlənmiş kartlarla işləyir. Bahisi və Deal-ı özün basırsan. Pəncərədəki AVTO ilə dayandırılır.",
                 12f, Ui.MUTED
             )
         )

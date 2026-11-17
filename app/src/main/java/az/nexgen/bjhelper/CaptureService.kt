@@ -21,6 +21,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
@@ -42,7 +43,7 @@ class CaptureService : Service() {
         private const val CHANNEL = "capture"
         private const val NOTIF_ID = 17
         private const val TAG = "BJHelper"
-        private const val TICK_MS = 120L
+        private const val TICK_MS = 150L
         private const val PEEK_WAIT_MS = 190L
         private const val MEMORY_MS = 10_000L
 
@@ -70,7 +71,15 @@ class CaptureService : Service() {
     private var savedCards = 0
     private var version = "?"
     private var cardReader: CardReader? = null
-    private var lastBitmap: Bitmap? = null
+    /** The newest frame; one bitmap is reused for every frame. */
+    private var frameBmp: Bitmap? = null
+    private val gate = FrameGate()
+    private val watch = ShuffleWatch()
+    private var zoneBuf = IntArray(0)
+    private var btnBuf = IntArray(0)
+    private var lastShuffleAt = 0L
+    private var lastNearAt = 0L
+    private var lastUiKey = ""
     private var lastReading: CardReader.Reading? = null
     private var started = false
     private var decks = 6
@@ -188,7 +197,7 @@ class CaptureService : Service() {
             r.surface, null, null
         )
 
-        val t = HandlerThread("bj-reader")
+        val t = HandlerThread("bj-reader", Process.THREAD_PRIORITY_BACKGROUND)
         t.start()
         thread = t
         val hd = Handler(t.looper)
@@ -196,20 +205,7 @@ class CaptureService : Service() {
 
         overlay = Overlay(
             this,
-            onResetShoe = {
-                hd.post {
-                    val cards = tracker.seen()
-                    var msg = "Dəstə sıfırlandı, say 0-dan başlayır"
-                    if (cards >= 10) {
-                        RoundStore.appendShuffle(this, cards, tracker.rc(), decks)
-                        refreshShoeLimit()
-                        msg = "Dəstə sıfırlandı. Oxunan kart: " + cards + " (≈" + String.format(Locale.US, "%.1f", cards / 52.0) + " dəstə)"
-                    }
-                    tracker.resetShoe()
-                    publish()
-                    toast(msg)
-                }
-            },
+            onResetShoe = { hd.post { resetShoe(false) } },
             onNewHand = { hd.post { tracker.clearRound(); publish() } },
             onToggleAuto = { hd.post { toggleAuto() } },
             onDebug = { hd.post { dumpDebug() } },
@@ -228,19 +224,25 @@ class CaptureService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun toBitmap(img: Image): Bitmap {
+    /** Copies the frame into the reusable bitmap. */
+    private fun copyFrame(img: Image) {
         val plane = img.planes[0]
         val pixelStride = plane.pixelStride
-        val rowStride = plane.rowStride
-        val rowPadding = rowStride - pixelStride * img.width
-        val wide = Bitmap.createBitmap(
-            img.width + rowPadding / pixelStride, img.height, Bitmap.Config.ARGB_8888
-        )
+        val rowPadding = plane.rowStride - pixelStride * img.width
+        if (rowPadding == 0) {
+            var bmp = frameBmp
+            if (bmp == null || bmp.width != img.width || bmp.height != img.height) {
+                bmp = Bitmap.createBitmap(img.width, img.height, Bitmap.Config.ARGB_8888)
+                frameBmp = bmp
+            }
+            bmp!!.copyPixelsFromBuffer(plane.buffer)
+            return
+        }
+        // rows are padded: copy wide, then cut the padding off
+        val wide = Bitmap.createBitmap(img.width + rowPadding / pixelStride, img.height, Bitmap.Config.ARGB_8888)
         wide.copyPixelsFromBuffer(plane.buffer)
-        if (rowPadding == 0) return wide
-        val out = Bitmap.createBitmap(wide, 0, 0, img.width, img.height)
+        frameBmp = Bitmap.createBitmap(wide, 0, 0, img.width, img.height)
         wide.recycle()
-        return out
     }
 
     private fun freshBlobs(now: Long): List<CardFinder.Box> =
@@ -272,11 +274,21 @@ class CaptureService : Service() {
         }
     }
 
-    /** Newest frame, or null if the screen has not produced a new one. */
-    private fun grab(): Bitmap? {
-        val img = reader?.acquireLatestImage() ?: return null
+    /**
+     * Takes the newest frame into [frameBmp].
+     * @return false when the screen has not produced a new frame, or nothing that matters changed
+     */
+    private fun grab(force: Boolean = false): Boolean {
+        val img = reader?.acquireLatestImage() ?: return false
         return try {
-            toBitmap(img)
+            val plane = img.planes[0]
+            if (!force && !gate.changed(plane.buffer, plane.rowStride, plane.pixelStride, img.width, img.height)) {
+                false
+            } else {
+                copyFrame(img)
+                if (force) gate.forget()
+                true
+            }
         } finally {
             img.close()
         }
@@ -287,12 +299,8 @@ class CaptureService : Service() {
         try {
             // a still screen produces no new frame: keep reading the last one so the tracker sees time pass
             val fresh = grab()
-            if (fresh != null) {
-                lastBitmap?.recycle()
-                lastBitmap = fresh
-            }
-            val bmp = lastBitmap
-            if (fresh != null && bmp != null) {
+            val bmp = frameBmp
+            if (fresh && bmp != null) {
                 readFrame(bmp)
             } else if (bmp != null) {
                 // nothing changed on screen: only let time pass for the tracker
@@ -329,7 +337,9 @@ class CaptureService : Service() {
             tracker.onHands(d, h, now, fl)
         }
         tracker.tick(now)
-        if (autoOn) buttons = readButtons(bmp)
+        watchShuffle(bmp, now)
+        // the buttons are only needed while it is the player's turn
+        buttons = if (autoOn && tracker.hands.isNotEmpty() && tracker.dealer.size == 1) readButtons(bmp) else emptyList()
         if (rd.missed.isNotEmpty() && now - lastMissedAt >= 2000L) {
             lastMissedAt = now
             log.note(rd.diag)
@@ -344,9 +354,45 @@ class CaptureService : Service() {
         val y0 = (ButtonFinder.TOP * h).toInt()
         val rows = (ButtonFinder.BOTTOM * h).toInt() - y0
         if (rows < 8) return emptyList()
-        val px = IntArray(w * rows)
-        bmp.getPixels(px, 0, w, 0, y0, w, rows)
-        return ButtonFinder.find(px, w, rows, y0, h)
+        if (btnBuf.size < w * rows) btnBuf = IntArray(w * rows)
+        bmp.getPixels(btnBuf, 0, w, 0, y0, w, rows)
+        return ButtonFinder.find(btnBuf, w, rows, y0, h)
+    }
+
+    /** Looks for the shuffling animation; when it is there the shoe is reset by itself. */
+    private fun watchShuffle(bmp: Bitmap, now: Long) {
+        val z = ShuffleDetector.zone(bmp.width, bmp.height)
+        if (zoneBuf.size < z.w * z.h) zoneBuf = IntArray(z.w * z.h)
+        bmp.getPixels(zoneBuf, 0, z.w, z.x, z.y, z.w, z.h)
+        val m = ShuffleDetector.measure(zoneBuf, z.w, z.h)
+        val info = String.format(Locale.US, "s=%.2f e=%d", m.share, m.extent)
+        if (watch.onFrame(now, m.flurry)) {
+            if (now - lastShuffleAt >= 20_000L) {
+                lastShuffleAt = now
+                log.note("qarışdırma tanındı " + info)
+                resetShoe(true)
+            }
+        } else if (m.share >= ShuffleDetector.NEAR_SHARE && !m.flurry && now - lastNearAt >= 3000L) {
+            lastNearAt = now
+            log.note("animasiya? " + info)
+        }
+    }
+
+    /** The cards were shuffled: the count starts again. Pressed by the person or seen on the screen. */
+    private fun resetShoe(auto: Boolean) {
+        val cards = tracker.seen()
+        var msg = "Dəstə sıfırlandı, say 0-dan başlayır"
+        if (cards >= 10) {
+            RoundStore.appendShuffle(this, cards, tracker.rc(), decks)
+            refreshShoeLimit()
+            msg = (if (auto) "Qarışdırma tanındı. " else "") + "Dəstə sıfırlandı. Oxunan kart: " + cards +
+                " (≈" + String.format(Locale.US, "%.1f", cards / 52.0) + " dəstə)"
+        } else if (auto) {
+            msg = "Qarışdırma tanındı, say 0-dan başlayır"
+        }
+        tracker.resetShoe()
+        publish()
+        toast(msg)
     }
 
     private fun toggleAuto() {
@@ -581,7 +627,15 @@ class CaptureService : Service() {
             diag + (if (autoOn && autoWhy.isNotEmpty()) " | avto: " + autoWhy else ""),
             tracker.dealerApprox, tracker.playerApprox, autoOn
         )
-        ui.post { overlay?.render(ui0) }
+        // draw only what changed: rebuilding the window many times a second costs more than reading the cards
+        val key = listOf(
+            badge, big, sub, color, d, hands, totals, rcText, tcText, tcColor,
+            st.short(), statsLong, note, tracker.dealerApprox, tracker.playerApprox, autoOn
+        ).toString()
+        if (key != lastUiKey) {
+            lastUiKey = key
+            ui.post { overlay?.render(ui0) }
+        }
     }
 
     private var shoeLimitCache = 0
@@ -607,16 +661,12 @@ class CaptureService : Service() {
         drain()
         ui.post { overlay?.setHidden(true) }
         hd.postDelayed({
-            val fresh = grab()
+            val fresh = grab(true)
             ui.post { overlay?.setHidden(false) }
-            val bmp = fresh ?: lastBitmap
+            val bmp = frameBmp
             if (bmp == null) {
                 toast("Hələ görüntü yoxdur")
             } else {
-                if (fresh != null) {
-                    lastBitmap?.recycle()
-                    lastBitmap = fresh
-                }
                 val rd = cardReader?.read(bmp)
                 lastReading = rd
                 val note = "D: " + joinCards(tracker.dealer) + " | P: " + joinCards(tracker.player) +
@@ -641,7 +691,7 @@ class CaptureService : Service() {
         try { reader?.close() } catch (t: Throwable) { Log.w(TAG, "close reader", t) }
         try { projection?.stop() } catch (t: Throwable) { Log.w(TAG, "stop projection", t) }
         overlay?.hide()
-        lastBitmap = null
+        frameBmp = null
         super.onDestroy()
     }
 }

@@ -49,6 +49,12 @@ class CardReader {
     private val classifier = RankClassifier.load()
     private val cache = HashMap<Long, RankClassifier.Result>()
 
+    // the frame's pixels are copied here every time: one buffer, not a new 7 MB array per frame
+    private var roiBuf = IntArray(0)
+    private var bandBuf = IntArray(0)
+
+    private fun buffer(old: IntArray, n: Int): IntArray = if (old.size >= n) old else IntArray(n)
+
     /** @param cover screen rectangle of our own window; marks under it cannot be trusted */
     fun read(bmp: Bitmap, cover: CardFinder.Box? = null): Reading {
         val w = bmp.width
@@ -56,7 +62,8 @@ class CardReader {
         val y0 = (h * CROP_TOP).toInt()
         val y1 = (h * CROP_BOTTOM).toInt()
         val roiH = y1 - y0
-        val px = IntArray(w * roiH)
+        roiBuf = buffer(roiBuf, w * roiH)
+        val px = roiBuf
         bmp.getPixels(px, 0, w, 0, y0, w, roiH)
 
         val found = CardFinder.find(px, w, roiH, h, y0)
@@ -156,7 +163,8 @@ class CardReader {
         val y1 = (bottom * h).toInt()
         val rows = y1 - y0
         if (rows < 8) return BadgeReader.Band(emptyList(), false)
-        val px = IntArray(w * rows)
+        bandBuf = buffer(bandBuf, w * rows)
+        val px = bandBuf
         bmp.getPixels(px, 0, w, 0, y0, w, rows)
         return BadgeReader.readBand(px, w, rows, y0, h, top, bottom, cover)
     }

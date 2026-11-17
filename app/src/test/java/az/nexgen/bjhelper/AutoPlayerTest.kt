@@ -77,10 +77,93 @@ class AutoPlayerTest {
         assertEquals(ButtonFinder.Kind.DOUBLE, d.kind)
     }
 
+    private val splitBtn = btn(ButtonFinder.Kind.SPLIT, 410)
+    private val four = listOf(
+        btn(ButtonFinder.Kind.STAND, 150), splitBtn, btn(ButtonFinder.Kind.DOUBLE, 670), btn(ButtonFinder.Kind.HIT, 930)
+    )
+
+    private fun states(dealer: List<Int>, hands: List<List<Int>>, buttons: List<ButtonFinder.Button>, changedAt: Long) =
+        AutoPlayer.State(dealer, hands, true, true, changedAt, buttons, null, false, 0.0)
+
+    /** Like [run], but also says when the decision came. */
+    private fun runT(p: AutoPlayer, s: AutoPlayer.State, from: Long): Pair<Long, AutoPlayer.Decision> {
+        var t = from
+        while (t < from + 6000) {
+            val d = p.decide(t, s)
+            if (d !is AutoPlayer.Decision.Wait) return Pair(t, d)
+            t += 120
+        }
+        return Pair(t, AutoPlayer.Decision.Wait("none"))
+    }
+
     @Test
-    fun leavesSplitsToThePerson() {
-        val d = run(AutoPlayer(Random(6)), state(listOf(6), listOf(8, 8), three))
-        assertTrue(d is AutoPlayer.Decision.Wait)
+    fun splitsWhenTheButtonIsThere() {
+        val d = run(AutoPlayer(Random(6)), state(listOf(6), listOf(8, 8), four)) as AutoPlayer.Decision.Tap
+        assertEquals(ButtonFinder.Kind.SPLIT, d.kind)
+        assertTrue(d.x in 310..510)
+    }
+
+    @Test
+    fun playsAPairAsATotalWhenThereIsNoSplitButton() {
+        // 8,8 against 10 is a split; without the button it is a hard 16: hit
+        val d = run(AutoPlayer(Random(16)), state(listOf(10), listOf(8, 8), three)) as AutoPlayer.Decision.Tap
+        assertEquals(ButtonFinder.Kind.HIT, d.kind)
+    }
+
+    @Test
+    fun playsASplitHandAfterHand() {
+        val p = AutoPlayer(Random(17))
+        val up = listOf(4)
+        // 7,7 against 4: split
+        val a = runT(p, states(up, listOf(listOf(7, 7)), four, 0L), 1000L)
+        assertEquals(ButtonFinder.Kind.SPLIT, (a.second as AutoPlayer.Decision.Tap).kind)
+        // left hand 10,6 against 4: stand
+        val left = states(up, listOf(listOf(10, 6), listOf(5, 2)), three, 9000L)
+        val b = runT(p, left, 10000L)
+        assertEquals(ButtonFinder.Kind.STAND, (b.second as AutoPlayer.Decision.Tap).kind)
+        // the right hand has not had its second card yet: nothing is pressed
+        assertTrue(p.decide(b.first + 600L, left) is AutoPlayer.Decision.Wait)
+        assertTrue(p.decide(b.first + 1500L, left) is AutoPlayer.Decision.Wait)
+        // right hand 9,2 = 11 against 4: double
+        val right = states(up, listOf(listOf(10, 6), listOf(9, 2)), three + listOf(), b.first + 1600L)
+        val c = runT(p, right, b.first + 1700L)
+        val tap = c.second as AutoPlayer.Decision.Tap
+        assertEquals(ButtonFinder.Kind.DOUBLE, tap.kind)
+        assertTrue(tap.label.contains("2. əl"))
+    }
+
+    @Test
+    fun aStandThatDidNothingIsPressedAgainOnTheSameHand() {
+        val p = AutoPlayer(Random(18))
+        val up = listOf(4)
+        runT(p, states(up, listOf(listOf(7, 7)), four, 0L), 1000L)
+        val left = states(up, listOf(listOf(10, 6), listOf(5, 2)), three, 9000L)
+        val b = runT(p, left, 10000L)
+        val again = runT(p, left, b.first + AutoPlayer.RETRY_MS)
+        val tap = again.second as AutoPlayer.Decision.Tap
+        assertEquals(ButtonFinder.Kind.STAND, tap.kind)
+        assertTrue(tap.label.contains("1. əl"))
+    }
+
+    @Test
+    fun skipsASplitHandThatIsOver() {
+        val p = AutoPlayer(Random(19))
+        val up = listOf(4)
+        runT(p, states(up, listOf(listOf(7, 7)), four, 0L), 1000L)
+        // the left hand has just gone bust; the right one is waited for, then played: 7 against 4 is a hit
+        val bust = states(up, listOf(listOf(10, 6, 9), listOf(5, 2)), three, 9000L)
+        val first = p.decide(10000L, bust)
+        assertTrue(first is AutoPlayer.Decision.Wait)
+        val r = runT(p, bust, 10100L)
+        val tap = r.second as AutoPlayer.Decision.Tap
+        assertEquals(ButtonFinder.Kind.HIT, tap.kind)
+        assertTrue(r.first >= 10000L + AutoPlayer.NEXT_HAND_MS)
+    }
+
+    @Test
+    fun leavesARoundThatStartedSplitToThePerson() {
+        val s = states(listOf(4), listOf(listOf(10, 6), listOf(9, 2)), three, 0L)
+        assertTrue(run(AutoPlayer(Random(20)), s) is AutoPlayer.Decision.Wait)
     }
 
     @Test

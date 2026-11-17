@@ -10,7 +10,7 @@ import kotlin.math.min
  */
 object ButtonFinder {
 
-    enum class Kind { STAND, DOUBLE, HIT }
+    enum class Kind { STAND, DOUBLE, HIT, SPLIT }
 
     class Button(val kind: Kind, val box: CardFinder.Box) {
         val cx: Int get() = (box.l + box.r) / 2
@@ -18,15 +18,15 @@ object ButtonFinder {
     }
 
     /** Where the buttons live, as fractions of the screen height. */
-    const val TOP = 0.82f
-    const val BOTTOM = 0.97f
+    const val TOP = 0.85f
+    const val BOTTOM = 0.955f
 
     private const val BLOCK = 4
 
     /**
      * Which button colour a pixel has, by hue: the tables differ in brightness (dark red, olive
      * green), but never in hue. Felt is a pure green (hue 120) and stays out of the button's range.
-     * @return 0 stand (red), 1 double (blue), 2 hit (green), -1 none
+     * @return 0 stand (red), 1 double (blue), 2 hit (green), 3 split (orange), -1 none
      */
     private fun kindOf(r: Int, g: Int, b: Int): Int {
         val mx = max(r, max(g, b))
@@ -40,6 +40,7 @@ object ButtonFinder {
         if (h < 0f) h += 360f
         if ((h >= 348f || h <= 12f) && mx >= 95 && d * 10 >= 7 * mx) return 0
         if (h in 70f..108f) return 2
+        if (h in 20f..45f && mx >= 150 && d * 100 >= 75 * mx) return 3
         if (h in 205f..230f && mx >= 100) return 1
         return -1
     }
@@ -66,6 +67,7 @@ object ButtonFinder {
                 Kind.STAND -> 0
                 Kind.DOUBLE -> 1
                 Kind.HIT -> 2
+                Kind.SPLIT -> 3
             }
             val on = BooleanArray(bw * bh)
             for (by in 0 until bh) for (bx in 0 until bw) {
