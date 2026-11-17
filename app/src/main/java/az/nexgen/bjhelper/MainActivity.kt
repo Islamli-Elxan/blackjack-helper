@@ -41,6 +41,7 @@ class MainActivity : Activity() {
     private lateinit var tilePush: TextView
     private lateinit var tileBj: TextView
     private lateinit var summary: TextView
+    private lateinit var autoStatus: TextView
     private lateinit var recent: TextView
     private val ui = Handler(Looper.getMainLooper())
 
@@ -168,6 +169,65 @@ class MainActivity : Activity() {
         countRow.addView(sw)
         game.addView(countRow)
         col.addView(game)
+
+        // --- auto play
+        val autoCard = Ui.card(this)
+        autoCard.addView(Ui.text(this, "AVTO OYUN", 11f, Ui.MUTED, true))
+        autoCard.addView(Ui.gap(this, 10))
+        val autoRow = LinearLayout(this)
+        autoRow.orientation = LinearLayout.HORIZONTAL
+        autoRow.gravity = Gravity.CENTER_VERTICAL
+        val autoCol = LinearLayout(this)
+        autoCol.orientation = LinearLayout.VERTICAL
+        autoCol.addView(Ui.text(this, "Düymələrə özü bassın", 14f, Ui.TEXT, true))
+        autoCol.addView(
+            Ui.text(
+                this,
+                "Tövsiyəyə uyğun Kart al, Dayan və İkiqat düymələrinə toxunur. Yalnız tək əl və təsdiqlənmiş kartlarla. " +
+                    "Bölünməni, bahisi və Deal-ı özün basırsan. Pəncərədəki AVTO ilə dayandırılır.",
+                12f, Ui.MUTED
+            )
+        )
+        autoRow.addView(autoCol, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val autoSw = Switch(this)
+        autoSw.isChecked = p.getBoolean("auto", false)
+        autoSw.setOnCheckedChangeListener { _, on ->
+            prefs().edit().putBoolean("auto", on).apply()
+        }
+        autoRow.addView(autoSw)
+        autoCard.addView(autoRow)
+        autoCard.addView(Ui.gap(this, 12))
+        autoStatus = Ui.text(this, "", 12.5f, Ui.TEXT, true)
+        autoCard.addView(autoStatus)
+        autoCard.addView(Ui.gap(this, 8))
+        val autoBtns = LinearLayout(this)
+        autoBtns.orientation = LinearLayout.HORIZONTAL
+        val b1 = Ui.button(this, "Accessibility", Ui.FIELD, Ui.GREEN) {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+        b1.textSize = 13f
+        val b2 = Ui.button(this, "Tətbiq məlumatı", Ui.FIELD, Ui.TEXT) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
+        b2.textSize = 13f
+        val l1 = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        l1.setMargins(0, 0, dp(6), 0)
+        autoBtns.addView(b1, l1)
+        autoBtns.addView(b2, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        autoCard.addView(autoBtns)
+        autoCard.addView(Ui.gap(this, 10))
+        autoCard.addView(
+            Ui.text(
+                this,
+                "Qoşmaq üçün:\n" +
+                    "1.  Accessibility → Yüklənmiş xidmətlər → Blackjack Köməkçisi → işə sal.\n" +
+                    "2.  Xidmət boz görünürsə və ya \"Məhdudlaşdırılmış ayar\" yazırsa: Tətbiq məlumatı → yuxarı sağdakı ⋮ → " +
+                    "\"Məhdud ayarlara icazə ver\", sonra 1-ə qayıt.\n" +
+                    "Oyunun qaydaları avtomatik oyunu qadağan edə bilər, hesab risqi sənindir.",
+                12f, Ui.MUTED
+            ).also { it.setLineSpacing(0f, 1.15f) }
+        )
+        col.addView(autoCard)
 
         // --- tips
         val tips = Ui.card(this)
@@ -326,6 +386,9 @@ class MainActivity : Activity() {
         permDot.text = if (ok) "✓" else "1"
         permText.text = if (ok) "Verilib" else "Pəncərənin oyunun üstündə görünməsi üçün lazımdır"
         permBtn.visibility = if (ok) android.view.View.GONE else android.view.View.VISIBLE
+        val tapOn = TapService.ready() || accessibilityListed()
+        autoStatus.text = if (tapOn) "Accessibility xidməti: qoşulub" else "Accessibility xidməti: qoşulmayıb"
+        autoStatus.setTextColor(if (tapOn) Ui.GREEN else Ui.GOLD)
         if (CaptureService.running) {
             runBtn.text = "■  Dayandır"
             runBtn.background = Ui.rounded(this, 0xFF3A1F1C.toInt(), 14)
@@ -335,6 +398,11 @@ class MainActivity : Activity() {
             runBtn.background = Ui.rounded(this, Ui.GOLD, 14)
             runBtn.setTextColor(0xFF2A1D00.toInt())
         }
+    }
+
+    private fun accessibilityListed(): Boolean {
+        val v = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+        return v.contains("$packageName/")
     }
 
     private fun toggleRun() {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tap_label">Blackjack Köməkçisi: avto toxunma</string>
+    <string name="tap_desc">Avto oyun işə salınanda oyunun Kart al, Dayan və İkiqat düymələrinə toxunur. Ekranın məzmununu oxumur.</string>
+</resources>

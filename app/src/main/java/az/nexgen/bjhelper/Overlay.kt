@@ -24,6 +24,7 @@ class Overlay(
     private val ctx: Context,
     private val onResetShoe: () -> Unit,
     private val onNewHand: () -> Unit,
+    private val onToggleAuto: () -> Unit,
     private val onDebug: () -> Unit,
     private val onStop: () -> Unit,
     private val onLayoutChanged: () -> Unit = {}
@@ -47,7 +48,9 @@ class Overlay(
         val diag: String,
         /** The dealer's / the player's hand is known only by the total the game prints. */
         val dealerApprox: Boolean = false,
-        val playerApprox: Boolean = false
+        val playerApprox: Boolean = false,
+        /** The auto player is pressing the buttons. */
+        val auto: Boolean = false
     )
 
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -58,6 +61,7 @@ class Overlay(
     private val bigTv = TextView(ctx)
     private val subTv = TextView(ctx)
     private val shuffleTv = TextView(ctx)
+    private val autoTv = TextView(ctx)
     private val betTv = TextView(ctx)
     private val details = LinearLayout(ctx)
     private val handsRow = LinearLayout(ctx)
@@ -138,6 +142,17 @@ class Overlay(
         val slp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         slp.setMargins(dp(4), 0, dp(6), 0)
         head.addView(shuffleTv, slp)
+        // switches the auto player on and off
+        autoTv.text = "AVTO"
+        autoTv.textSize = 11f
+        autoTv.setTypeface(Typeface.DEFAULT_BOLD)
+        autoTv.gravity = Gravity.CENTER
+        autoTv.setPadding(dp(9), dp(5), dp(9), dp(5))
+        autoTv.setOnClickListener { onToggleAuto() }
+        paintAuto(false)
+        val alp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        alp.setMargins(0, 0, dp(6), 0)
+        head.addView(autoTv, alp)
         head.addView(betTv)
 
         // details
@@ -215,6 +230,12 @@ class Overlay(
                 return false
             }
         })
+    }
+
+    private fun paintAuto(on: Boolean) {
+        autoTv.setTextColor(if (on) 0xFF10201A.toInt() else 0xFFA9BBB0.toInt())
+        autoTv.background = pillBg(if (on) 0xFF7FE3A2.toInt() else 0x26FFFFFF)
+        autoTv.text = if (on) "▶ AVTO" else "AVTO"
     }
 
     private fun pillBg(color: Int): GradientDrawable {
@@ -357,6 +378,7 @@ class Overlay(
         badgeTv.background = badgeBg
         badgeTv.text = s.badge
 
+        paintAuto(s.auto)
         bigTv.text = s.big
         bigTv.setTextColor(accent)
         subTv.text = s.sub

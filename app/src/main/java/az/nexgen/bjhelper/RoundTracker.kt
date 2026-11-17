@@ -30,6 +30,16 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
     var playerApprox = false
         private set
 
+    /** The accepted hand was confirmed by (or built from) the printed total, not read alone. */
+    var dealerChecked = false
+        private set
+    var playerChecked = false
+        private set
+
+    /** When the accepted state last changed; the auto player waits for it to settle. */
+    var lastChangeAt = 0L
+        private set
+
     /** All the player's cards, hand after hand. */
     val player: List<Int> get() = hands.flatten()
 
@@ -83,6 +93,7 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
             ) {
                 dealer = pendD
                 dealerApprox = pendFlags.dealerApprox
+                dealerChecked = dFree
                 changed = true
             }
             val pFree = pendFlags.playerVerified || pendFlags.playerApprox
@@ -92,6 +103,7 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
             ) {
                 hands = pendH
                 playerApprox = pendFlags.playerApprox
+                playerChecked = pFree
                 changed = true
             }
         }
@@ -99,6 +111,7 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
             commitRound()
             changed = true
         }
+        if (changed) lastChangeAt = now
         return changed
     }
 
@@ -119,6 +132,8 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
         hands = emptyList()
         dealerApprox = false
         playerApprox = false
+        dealerChecked = false
+        playerChecked = false
     }
 
     /** Forget the current round without adding it to the count. */

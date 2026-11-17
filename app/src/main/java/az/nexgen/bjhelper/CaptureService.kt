@@ -81,6 +81,10 @@ class CaptureService : Service() {
     private var blobMemory: List<CardFinder.Box> = emptyList()
     private var blobMemoryAt = 0L
     @Volatile private var diag = ""
+    private val auto = AutoPlayer()
+    @Volatile private var autoOn = false
+    private var buttons: List<ButtonFinder.Button> = emptyList()
+    private var autoWhy = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -143,6 +147,7 @@ class CaptureService : Service() {
         decks = prefs.getInt("decks", 6)
         shoeLimitCache = 0
         countMode = prefs.getBoolean("count", true)
+        autoOn = prefs.getBoolean("auto", false) && TapService.ready()
         val prior = RoundStore.load(this)
         log.start(prior.second, prior.first)
         tracker.restore(prefs.getInt("shoeRc", 0), prefs.getInt("shoeCards", 0))
@@ -206,6 +211,7 @@ class CaptureService : Service() {
                 }
             },
             onNewHand = { hd.post { tracker.clearRound(); publish() } },
+            onToggleAuto = { hd.post { toggleAuto() } },
             onDebug = { hd.post { dumpDebug() } },
             onStop = { stopSelf() },
             onLayoutChanged = { onOverlayLayout() }
@@ -292,6 +298,7 @@ class CaptureService : Service() {
                 // nothing changed on screen: only let time pass for the tracker
                 if (tracker.tick(SystemClock.elapsedRealtime())) publish()
             }
+            autoStep()
         } catch (t: Throwable) {
             Log.e(TAG, "tick failed", t)
         }
@@ -322,12 +329,76 @@ class CaptureService : Service() {
             tracker.onHands(d, h, now, fl)
         }
         tracker.tick(now)
+        if (autoOn) buttons = readButtons(bmp)
         if (rd.missed.isNotEmpty() && now - lastMissedAt >= 2000L) {
             lastMissedAt = now
             log.note(rd.diag)
             for (m in rd.missed) log.missed(m)
         }
         publish()
+    }
+
+    private fun readButtons(bmp: Bitmap): List<ButtonFinder.Button> {
+        val w = bmp.width
+        val h = bmp.height
+        val y0 = (ButtonFinder.TOP * h).toInt()
+        val rows = (ButtonFinder.BOTTOM * h).toInt() - y0
+        if (rows < 8) return emptyList()
+        val px = IntArray(w * rows)
+        bmp.getPixels(px, 0, w, 0, y0, w, rows)
+        return ButtonFinder.find(px, w, rows, y0, h)
+    }
+
+    private fun toggleAuto() {
+        if (autoOn) {
+            setAuto(false)
+            toast("Avto oyun dayandırıldı")
+        } else if (!TapService.ready()) {
+            toast("Avto üçün Accessibility xidməti qoşulmalıdır: tətbiqi aç, Avto oyun kartına bax")
+        } else {
+            auto.reset()
+            setAuto(true)
+            toast("Avto oyun işləyir")
+        }
+    }
+
+    private fun setAuto(on: Boolean) {
+        autoOn = on
+        autoWhy = ""
+        buttons = emptyList()
+        getSharedPreferences("bj", Context.MODE_PRIVATE).edit().putBoolean("auto", on).apply()
+        publish()
+    }
+
+    /** Presses a button when the cards are confirmed and the strategy has an answer. */
+    private fun autoStep() {
+        if (!autoOn) return
+        val now = SystemClock.elapsedRealtime()
+        val rc = tracker.rc()
+        val left = maxOf(decks - tracker.seen() / 52.0, 0.25)
+        val tc = (rc / maxOf(left, 1.0)).coerceIn(-12.0, 12.0)
+        val useCount = countMode && tracker.seen() <= shoeLimit()
+        val st = AutoPlayer.State(
+            tracker.dealer, tracker.hands, tracker.dealerChecked, tracker.playerChecked,
+            tracker.lastChangeAt, buttons, ovBounds, useCount, tc
+        )
+        when (val d = auto.decide(now, st)) {
+            is AutoPlayer.Decision.Wait -> autoWhy = d.why
+            is AutoPlayer.Decision.Tap -> {
+                autoWhy = d.label
+                val ok = TapService.tap(d.x, d.y)
+                log.note("avto: " + d.label + " @" + d.x + "," + d.y + (if (ok) "" else " (toxunulmadı)"))
+                if (!ok) {
+                    setAuto(false)
+                    toast("Avto dayandı: Accessibility xidməti cavab vermir")
+                }
+            }
+            is AutoPlayer.Decision.Stuck -> {
+                log.note("avto: dayandı, " + d.why)
+                setAuto(false)
+                toast("Avto dayandı: düyməyə basmaq nəticə vermir")
+            }
+        }
     }
 
     private fun label(r: Int): String = if (r == 11) "A" else r.toString()
@@ -506,7 +577,9 @@ class CaptureService : Service() {
         val statsLong = if (st.push > 0) "= " + st.push else ""
         val ui0 = Overlay.UiState(
             badge, big, sub, color, d, hands, totals, rcText, tcText, tcColor,
-            st.short(), statsLong, note, diag, tracker.dealerApprox, tracker.playerApprox
+            st.short(), statsLong, note,
+            diag + (if (autoOn && autoWhy.isNotEmpty()) " | avto: " + autoWhy else ""),
+            tracker.dealerApprox, tracker.playerApprox, autoOn
         )
         ui.post { overlay?.render(ui0) }
     }
