@@ -120,4 +120,13 @@ class ShuffleDetectorTest {
         for (y in 0 until h) for (x in 1000 until 1080) buf.putInt((y * w + x) * 4, y * 31 + x)
         assertFalse(gate.changed(buf, w * 4, 4, w, h))
     }
+
+    @Test
+    fun watchKnowsWhenTheAnimationIsOnScreen() {
+        val w = ShuffleWatch()
+        assertFalse(w.recent(0L))
+        w.onFrame(1000L, true)
+        assertTrue(w.recent(1200L))
+        assertFalse(w.recent(1000L + ShuffleWatch.RECENT_MS + 10))
+    }
 }

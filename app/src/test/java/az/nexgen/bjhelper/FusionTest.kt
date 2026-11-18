@@ -160,4 +160,19 @@ class FusionTest {
         // only the player's real cards count: 10 is -1, 5 is +1
         assertEquals(0, t.rc())
     }
+
+    @Test
+       fun sameCardsSeenAgainAsVerifiedBecomeChecked() {
+           val t = RoundTracker(stableMs = 300L, clearMs = 900L)
+           // first read without a confirming total: accepted but not checked
+           t.onHands(listOf(10), listOf(listOf(10, 6)), 0L)
+           t.tick(400L)
+           assertEquals(false, t.dealerChecked)
+           assertEquals(false, t.playerChecked)
+           // the very same cards again, now confirmed by the printed totals
+           t.onHands(listOf(10), listOf(listOf(10, 6)), 500L, RoundTracker.Flags(true, true))
+           t.tick(900L)
+           assertEquals(true, t.dealerChecked)
+           assertEquals(true, t.playerChecked)
+       }
 }

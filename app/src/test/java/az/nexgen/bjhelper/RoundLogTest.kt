@@ -99,4 +99,28 @@ class RoundLogTest {
         assertEquals(1, log.stats.blackjack)
         assertEquals(1, log.stats.rounds)
     }
+
+    @Test
+    fun naturalWithUnreadSecondCardIsCountedFromThePrintedTotal() {
+        val log = RoundLog(settleMs = 500L)
+        fun u(now: Long, d: List<Int>, h: List<List<Int>>, layout: String) =
+            log.update(now, 1_000_000L + now, d, h, 0, 0.0, emptyList(), layout, 6, true)
+        u(0, listOf(6), listOf(listOf(11)), "D:300 M:400 B:d6 m11/21")
+        u(2000, listOf(6), listOf(listOf(11)), "D:300 M:400 B:d6 m11/21")
+        val done = u(6000, emptyList(), emptyList(), "")
+        assertNotNull(done)
+        assertEquals(listOf(Outcome.Kind.BLACKJACK), done!!.results)
+        assertEquals(1, log.stats.blackjack)
+    }
+
+    @Test
+    fun singleCardWithoutPrintedTwentyOneIsNotANatural() {
+        val log = RoundLog(settleMs = 500L)
+        fun u(now: Long, d: List<Int>, h: List<List<Int>>, layout: String) =
+            log.update(now, 1_000_000L + now, d, h, 0, 0.0, emptyList(), layout, 6, true)
+        u(0, listOf(6), listOf(listOf(10)), "D:300 M:400 B:d6 m10")
+        u(2000, listOf(6), listOf(listOf(10)), "D:300 M:400 B:d6 m10")
+        u(6000, emptyList(), emptyList(), "")
+        assertEquals(0, log.stats.blackjack)
+    }
 }

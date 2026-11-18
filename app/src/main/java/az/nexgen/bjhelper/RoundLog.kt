@@ -55,6 +55,8 @@ class RoundLog(
     private var decidedKey = ""
     private var decidedSince = 0L
     private var counted = false
+    /** The game printed 21 for the player's hand while no more than two cards were read. */
+    private var printed21 = false
 
     fun start(nextId: Int, prior: Stats) {
         this.nextId = nextId
@@ -90,6 +92,7 @@ class RoundLog(
             t0 = now
             counted = false
             decidedKey = ""
+            printed21 = false
             lastDealer = emptyList()
             lastHands = emptyList()
             lastAdvice = emptyList()
@@ -97,6 +100,7 @@ class RoundLog(
         }
         val badgeKey = layout.substringAfter(" B:", "")
         val changed = dealer != lastDealer || hands != lastHands || advice != lastAdvice || badgeKey != lastBadgeKey
+        if (hands.size == 1 && hands[0].size <= 2 && showsTwentyOne(badgeKey)) printed21 = true
         if (changed && r.events.size < MAX_EVENTS) {
             r.events.add(Event(now - t0, dealer, hands, rc, tc, advice, layout))
         }
@@ -147,15 +151,26 @@ class RoundLog(
         r.finalDealer = lastDealer
         r.finalHands = lastHands
         r.durationMs = now - t0
-        // a natural 21 against a dealer who did not turn a second card is paid at once: a win
-        if (!counted && lastHands.size == 1 && lastDealer.size == 1 && lastHands[0].size == 2 &&
-            Strategy.evalHand(lastHands[0]).total == 21 && r.results == null
-        ) {
+        // a natural 21 against a dealer who did not turn a second card is paid at once: a win.
+        // It is over so fast that the second card is sometimes never read; the printed 21 tells.
+        val natural = lastHands.size == 1 && lastDealer.size <= 1 && (
+            (lastHands[0].size == 2 && Strategy.evalHand(lastHands[0]).total == 21) ||
+                (lastHands[0].size == 1 && printed21)
+            )
+        if (!counted && natural && r.results == null) {
             r.results = listOf(Outcome.Kind.BLACKJACK)
             addToStats(Outcome.Kind.BLACKJACK)
             stats.rounds++
         }
         return r
+    }
+
+    /** "d5 m21" or "d10 m6/16,21": did the player's total show 21? */
+    private fun showsTwentyOne(badgeKey: String): Boolean {
+        val i = badgeKey.indexOf(" m")
+        if (i < 0) return false
+        val totals = badgeKey.substring(i + 2).trim().split(',')
+        return totals.any { it.trimEnd('~').substringAfter('/') == "21" }
     }
 
     private fun addToStats(k: Outcome.Kind) {

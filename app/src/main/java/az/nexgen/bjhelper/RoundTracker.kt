@@ -88,7 +88,13 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
             // it must not replace the real cards already known with the same total
             val dKeep = pendFlags.dealerApprox && !dealerApprox && dealer.isNotEmpty() &&
                 sameTotals(listOf(dealer), listOf(pendD))
-            if (pendD.isNotEmpty() && !dKeep && (pendD != dealer || pendFlags.dealerApprox != dealerApprox) &&
+            // the same cards seen again with the printed total agreeing: now they are confirmed
+            if (dKeep && !dealerChecked) {
+                dealerChecked = true
+                changed = true
+            }
+            if (pendD.isNotEmpty() && !dKeep &&
+                (pendD != dealer || pendFlags.dealerApprox != dealerApprox || (dFree && !dealerChecked)) &&
                 (dFree || pendD.size >= dealer.size)
             ) {
                 dealer = pendD
@@ -98,7 +104,12 @@ class RoundTracker(private val stableMs: Long = 450L, private val clearMs: Long 
             }
             val pFree = pendFlags.playerVerified || pendFlags.playerApprox
             val pKeep = pendFlags.playerApprox && !playerApprox && hands.isNotEmpty() && sameTotals(hands, pendH)
-            if (pendH.isNotEmpty() && !pKeep && (pendH != hands || pendFlags.playerApprox != playerApprox) &&
+            if (pKeep && !playerChecked) {
+                playerChecked = true
+                changed = true
+            }
+            if (pendH.isNotEmpty() && !pKeep &&
+                (pendH != hands || pendFlags.playerApprox != playerApprox || (pFree && !playerChecked)) &&
                 (pFree || pendH.sumOf { it.size } >= player.size)
             ) {
                 hands = pendH

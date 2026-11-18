@@ -315,11 +315,20 @@ class CaptureService : Service() {
 
     private fun readFrame(bmp: Bitmap) {
         val cr = cardReader ?: return
+        val now = SystemClock.elapsedRealtime()
+        // the shuffling animation first: while it runs the table holds no hand, and the card
+        // corners that flip past are not read (they would show up as a round of their own)
+        if (watchShuffle(bmp, now)) {
+            tracker.onHands(emptyList(), emptyList(), now)
+            tracker.tick(now)
+            buttons = emptyList()
+            publish()
+            return
+        }
         val rd = cr.read(bmp, ovBounds)
         lastReading = rd
         diag = rd.diag
         layout = rd.layout
-        val now = SystemClock.elapsedRealtime()
         if (rd.blobs.isNotEmpty()) {
             blobMemory = rd.blobs
             blobMemoryAt = now
@@ -337,7 +346,6 @@ class CaptureService : Service() {
             tracker.onHands(d, h, now, fl)
         }
         tracker.tick(now)
-        watchShuffle(bmp, now)
         // the buttons are only needed while it is the player's turn
         buttons = if (autoOn && tracker.hands.isNotEmpty() && tracker.dealer.size == 1) readButtons(bmp) else emptyList()
         if (rd.missed.isNotEmpty() && now - lastMissedAt >= 2000L) {
@@ -360,7 +368,7 @@ class CaptureService : Service() {
     }
 
     /** Looks for the shuffling animation; when it is there the shoe is reset by itself. */
-    private fun watchShuffle(bmp: Bitmap, now: Long) {
+    private fun watchShuffle(bmp: Bitmap, now: Long): Boolean {
         val z = ShuffleDetector.zone(bmp.width, bmp.height)
         if (zoneBuf.size < z.w * z.h) zoneBuf = IntArray(z.w * z.h)
         bmp.getPixels(zoneBuf, 0, z.w, z.x, z.y, z.w, z.h)
@@ -372,10 +380,11 @@ class CaptureService : Service() {
                 log.note("qarışdırma tanındı " + info)
                 resetShoe(true)
             }
-        } else if (m.share >= ShuffleDetector.NEAR_SHARE && !m.flurry && now - lastNearAt >= 3000L) {
+        } else if (m.share >= ShuffleDetector.NEAR_SHARE && m.extent >= 400 && !m.flurry && now - lastNearAt >= 3000L) {
             lastNearAt = now
             log.note("animasiya? " + info)
         }
+        return watch.recent(now)
     }
 
     /** The cards were shuffled: the count starts again. Pressed by the person or seen on the screen. */

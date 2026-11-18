@@ -20,9 +20,9 @@ object ShuffleDetector {
         val flurry: Boolean get() = share >= MIN_SHARE && extent >= zoneW * 63 / 100
     }
 
-    const val MIN_SHARE = 0.09f
+    const val MIN_SHARE = 0.06f
     /** Worth a line in the report when it is not a full match. */
-    const val NEAR_SHARE = 0.06f
+    const val NEAR_SHARE = 0.04f
 
     /** @param px the zone's pixels, row by row, [zw] x [zh] */
     fun measure(px: IntArray, zw: Int, zh: Int): Result {
@@ -73,12 +73,14 @@ class ShuffleWatch {
     private val hits = ArrayDeque<Long>()
     private var latched = false
     private var lastHit = 0L
+    private var any = false
 
     /** @return true once, when the animation has been seen on enough frames */
     fun onFrame(now: Long, flurry: Boolean): Boolean {
         if (flurry) {
             hits.addLast(now)
             lastHit = now
+            any = true
         }
         while (hits.isNotEmpty() && now - hits.first > WINDOW_MS) hits.removeFirst()
         if (latched) {
@@ -93,7 +95,11 @@ class ShuffleWatch {
         return false
     }
 
+    /** The animation is on screen (or was a moment ago): what shows on the table is not a hand. */
+    fun recent(now: Long): Boolean = any && now - lastHit < RECENT_MS
+
     companion object {
+        const val RECENT_MS = 1500L
         const val NEEDED = 4
         const val WINDOW_MS = 2500L
         /** The animation is over when no frame has shown it for this long. */
